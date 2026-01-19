@@ -70,13 +70,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { AgentOpsEvent, EventType } from '../types/events'
-import { createMockEventStream, type MockClientControl } from '../client/mockClient'
+import { createMockEventStream, type MockStreamControl } from '../client/mockStream'
 
 const events = ref<AgentOpsEvent[]>([])
 const selectedAgent = ref<string>('all')
 const selectedType = ref<string>('all')
 
-let mockClient: MockClientControl | null = null
+let mockClient: MockStreamControl | null = null
 
 const eventTypes: EventType[] = [
   'run.started',

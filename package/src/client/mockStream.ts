@@ -1,13 +1,12 @@
 import type { AgentOpsEvent, EventType } from '../types/events'
 
-export interface MockClientOptions {
+export interface MockStreamOptions {
   onEvent: (event: AgentOpsEvent) => void
   intervalMs?: number
   runId?: string
-  maxEvents?: number
 }
 
-export interface MockClientControl {
+export interface MockStreamControl {
   stop: () => void
 }
 
@@ -22,12 +21,11 @@ const eventTypes: EventType[] = [
   'error'
 ]
 
-export function createMockEventStream(options: MockClientOptions): MockClientControl {
+export function createMockEventStream(options: MockStreamOptions): MockStreamControl {
   const {
     onEvent,
     intervalMs = 1000,
-    runId,
-    maxEvents
+    runId
   } = options
 
   let eventCounter = 0
@@ -66,11 +64,6 @@ export function createMockEventStream(options: MockClientOptions): MockClientCon
   }
 
   intervalId = window.setInterval(() => {
-    if (maxEvents !== undefined && eventCounter >= maxEvents) {
-      stop()
-      return
-    }
-
     const event = generateEvent()
     onEvent(event)
   }, intervalMs)

@@ -9,6 +9,8 @@ export type EventType =
   | 'run.completed'
   | 'error'
 
+export type EventLevel = 'debug' | 'info' | 'warn' | 'error'
+
 export interface AgentOpsEvent {
   id: string
   ts: number
