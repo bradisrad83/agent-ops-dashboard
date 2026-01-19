@@ -7,7 +7,7 @@
     "playground"
   ],
   "scripts": {
-    "dev": "pnpm -C playground dev",
+    "dev": "pnpm -C package build && pnpm -C playground dev",
     "build": "pnpm -C package build"
   }
 }

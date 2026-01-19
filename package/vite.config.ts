@@ -10,6 +10,7 @@ export default defineConfig({
       name: "AgentOpsDashboard",
       formats: ["es", "cjs"],
       fileName: (format) => (format === "es" ? "index.js" : "index.cjs"),
+      cssFileName: "style",
     },
     rollupOptions: {
       external: ["vue"],
