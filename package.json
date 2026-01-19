@@ -8,6 +8,8 @@
   ],
   "scripts": {
     "dev": "pnpm -C package build && pnpm -C playground dev",
-    "build": "pnpm -C package build"
+    "build": "pnpm -C package build",
+    "server": "node server/index.js",
+    "server:dev": "node server/index.js"
   }
 }

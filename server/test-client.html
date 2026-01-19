@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Ops Dashboard - API Test Client</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 { color: #333; }
+    .section {
+      background: white;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    button {
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #0056b3; }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    .log {
+      background: #f8f9fa;
+      border: 1px solid #dee2e6;
+      border-radius: 4px;
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+    .log-entry {
+      padding: 4px 0;
+      border-bottom: 1px solid #e9ecef;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .event { color: #28a745; }
+    .error { color: #dc3545; }
+    .info { color: #007bff; }
+    input, select {
+      padding: 8px;
+      margin: 5px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🔧 Agent Ops Dashboard - API Test Client</h1>
+
+  <div class="section">
+    <h2>1. Create Run</h2>
+    <input type="text" id="runTitle" placeholder="Run title" value="Test Run">
+    <button onclick="createRun()">Create Run</button>
+    <p id="runInfo" class="info"></p>
+  </div>
+
+  <div class="section">
+    <h2>2. List Runs</h2>
+    <button onclick="listRuns()">Fetch Runs</button>
+    <div id="runsList" class="log"></div>
+  </div>
+
+  <div class="section">
+    <h2>3. Post Event</h2>
+    <input type="text" id="runIdInput" placeholder="Run ID">
+    <select id="eventType">
+      <option value="run.started">run.started</option>
+      <option value="task.progress">task.progress</option>
+      <option value="tool.called">tool.called</option>
+      <option value="tool.result">tool.result</option>
+      <option value="artifact.produced">artifact.produced</option>
+      <option value="error">error</option>
+    </select>
+    <input type="text" id="eventMessage" placeholder="Message" value="Test event">
+    <button onclick="postEvent()">Post Event</button>
+  </div>
+
+  <div class="section">
+    <h2>4. Fetch Events</h2>
+    <input type="text" id="fetchRunId" placeholder="Run ID">
+    <button onclick="fetchEvents()">Fetch Events</button>
+    <div id="eventsList" class="log"></div>
+  </div>
+
+  <div class="section">
+    <h2>5. SSE Stream</h2>
+    <input type="text" id="streamRunId" placeholder="Run ID">
+    <button onclick="startStream()" id="streamBtn">Start Stream</button>
+    <button onclick="stopStream()" id="stopBtn" disabled>Stop Stream</button>
+    <div id="streamLog" class="log"></div>
+  </div>
+
+  <script>
+    const BASE_URL = 'http://localhost:8787';
+    let currentRunId = null;
+    let streamControl = null;
+
+    function log(elementId, message, type = 'info') {
+      const el = document.getElementById(elementId);
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      el.appendChild(entry);
+      el.scrollTop = el.scrollHeight;
+    }
+
+    async function createRun() {
+      const title = document.getElementById('runTitle').value;
+      try {
+        const res = await fetch(`${BASE_URL}/api/runs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title })
+        });
+        const run = await res.json();
+        currentRunId = run.id;
+        document.getElementById('runIdInput').value = run.id;
+        document.getElementById('fetchRunId').value = run.id;
+        document.getElementById('streamRunId').value = run.id;
+        document.getElementById('runInfo').textContent = `✅ Created: ${run.id}`;
+      } catch (err) {
+        document.getElementById('runInfo').textContent = `❌ Error: ${err.message}`;
+      }
+    }
+
+    async function listRuns() {
+      try {
+        const res = await fetch(`${BASE_URL}/api/runs`);
+        const runs = await res.json();
+        const el = document.getElementById('runsList');
+        el.innerHTML = '';
+        runs.forEach(run => {
+          log('runsList', `${run.id} - ${run.title} (${run.status})`, 'info');
+        });
+      } catch (err) {
+        log('runsList', `Error: ${err.message}`, 'error');
+      }
+    }
+
+    async function postEvent() {
+      const runId = document.getElementById('runIdInput').value;
+      const type = document.getElementById('eventType').value;
+      const message = document.getElementById('eventMessage').value;
+
+      if (!runId) {
+        alert('Please enter a Run ID');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${BASE_URL}/api/runs/${runId}/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            payload: { message }
+          })
+        });
+        const event = await res.json();
+        alert(`✅ Event posted: ${event.id}`);
+      } catch (err) {
+        alert(`❌ Error: ${err.message}`);
+      }
+    }
+
+    async function fetchEvents() {
+      const runId = document.getElementById('fetchRunId').value;
+      if (!runId) {
+        alert('Please enter a Run ID');
+        return;
+      }
+
+      try {
+        const res = await fetch(`${BASE_URL}/api/runs/${runId}/events?limit=50`);
+        const events = await res.json();
+        const el = document.getElementById('eventsList');
+        el.innerHTML = '';
+        events.forEach(event => {
+          log('eventsList', `[${event.type}] ${JSON.stringify(event.payload)}`, 'event');
+        });
+      } catch (err) {
+        log('eventsList', `Error: ${err.message}`, 'error');
+      }
+    }
+
+    async function startStream() {
+      const runId = document.getElementById('streamRunId').value;
+      if (!runId) {
+        alert('Please enter a Run ID');
+        return;
+      }
+
+      document.getElementById('streamBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+      document.getElementById('streamLog').innerHTML = '';
+
+      try {
+        const abortController = new AbortController();
+        const response = await fetch(`${BASE_URL}/api/runs/${runId}/stream`, {
+          signal: abortController.signal,
+          headers: { 'Accept': 'text/event-stream' }
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        log('streamLog', 'Stream connected', 'info');
+
+        streamControl = {
+          stop: () => {
+            abortController.abort();
+            reader.cancel();
+          }
+        };
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const data = line.slice(6);
+              if (data.trim()) {
+                try {
+                  const event = JSON.parse(data);
+                  log('streamLog', `[${event.type}] ${JSON.stringify(event.payload)}`, 'event');
+                } catch (err) {
+                  log('streamLog', `Parse error: ${err.message}`, 'error');
+                }
+              }
+            } else if (line.startsWith(':')) {
+              log('streamLog', line, 'info');
+            }
+          }
+        }
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          log('streamLog', `Stream error: ${err.message}`, 'error');
+        }
+      } finally {
+        document.getElementById('streamBtn').disabled = false;
+        document.getElementById('stopBtn').disabled = true;
+        log('streamLog', 'Stream disconnected', 'info');
+      }
+    }
+
+    function stopStream() {
+      if (streamControl) {
+        streamControl.stop();
+        streamControl = null;
+      }
+    }
+  </script>
+</body>
+</html>
