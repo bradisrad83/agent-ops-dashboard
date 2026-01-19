@@ -69,25 +69,24 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-
-interface AgentOpsEvent {
-  id: string
-  ts: number
-  runId: string
-  agentId: string
-  type: 'run.started' | 'task.progress' | 'tool.called' | 'tool.result' | 'artifact.produced' | 'run.completed' | 'error'
-  payload: Record<string, any>
-}
+import type { AgentOpsEvent, EventType } from '../types/events'
+import { createMockEventStream, type MockClientControl } from '../client/mockClient'
 
 const events = ref<AgentOpsEvent[]>([])
 const selectedAgent = ref<string>('all')
 const selectedType = ref<string>('all')
 
-let intervalId: number | null = null
-let eventCounter = 0
+let mockClient: MockClientControl | null = null
 
-const agents = ['orchestrator', 'agent-alpha', 'agent-beta']
-const eventTypes: AgentOpsEvent['type'][] = ['run.started', 'task.progress', 'tool.called', 'tool.result', 'artifact.produced', 'run.completed', 'error']
+const eventTypes: EventType[] = [
+  'run.started',
+  'task.progress',
+  'tool.called',
+  'tool.result',
+  'artifact.produced',
+  'run.completed',
+  'error'
+]
 
 const agentList = computed(() => {
   const unique = new Set(events.value.map(e => e.agentId))
@@ -104,47 +103,21 @@ const filteredEvents = computed(() => {
   })
 })
 
-function generateEvent(): AgentOpsEvent {
-  const agentId = agents[Math.floor(Math.random() * agents.length)]
-  const type = eventTypes[Math.floor(Math.random() * eventTypes.length)]
-  const runId = `run-${Math.floor(eventCounter / 10)}`
-
-  const payloads: Record<AgentOpsEvent['type'], Record<string, any>> = {
-    'run.started': { task: 'Processing request' },
-    'task.progress': { step: Math.floor(Math.random() * 5) + 1, description: 'Executing step' },
-    'tool.called': { tool: ['search', 'calculate', 'fetch'][Math.floor(Math.random() * 3)], args: {} },
-    'tool.result': { result: 'success', data: { value: Math.random() * 100 } },
-    'artifact.produced': { artifactId: `artifact-${Math.floor(Math.random() * 1000)}`, type: 'output' },
-    'run.completed': { status: 'success', duration: Math.random() * 1000 },
-    'error': { message: 'Simulated error', code: 'ERR_SIM' }
-  }
-
-  return {
-    id: `evt-${++eventCounter}`,
-    ts: Date.now(),
-    runId,
-    agentId,
-    type,
-    payload: payloads[type]
-  }
-}
-
-function startEventStream() {
-  intervalId = window.setInterval(() => {
-    events.value.push(generateEvent())
-    if (events.value.length > 100) {
-      events.value.shift()
-    }
-  }, 1000)
-}
-
 onMounted(() => {
-  startEventStream()
+  mockClient = createMockEventStream({
+    onEvent: (event) => {
+      events.value.push(event)
+      if (events.value.length > 100) {
+        events.value.shift()
+      }
+    },
+    intervalMs: 1000
+  })
 })
 
 onUnmounted(() => {
-  if (intervalId !== null) {
-    clearInterval(intervalId)
+  if (mockClient) {
+    mockClient.stop()
   }
 })
 </script>
