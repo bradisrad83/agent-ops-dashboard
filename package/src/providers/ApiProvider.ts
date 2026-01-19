@@ -62,7 +62,8 @@ export function createApiProvider(config: ApiProviderConfig = {}): EventStreamPr
       let abortController = new AbortController()
       let lastCursor: string | number = 0
       let sseActive = false
-      let pollingInterval: ReturnType<typeof setInterval> | null = null
+      let reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+      let reconnectDelay = 250 // Start at 250ms
 
       // Helper: check if event should be emitted (no duplicates)
       const shouldEmit = (eventId: string | number): boolean => {
@@ -85,27 +86,34 @@ export function createApiProvider(config: ApiProviderConfig = {}): EventStreamPr
         }
       }
 
-      // SSE implementation with robust parsing
+      // SSE implementation with robust parsing and auto-reconnect
       const trySSE = async () => {
         try {
+          // Include Last-Event-ID header for resume support
+          const sseHeaders = getHeaders({ 'Accept': 'text/event-stream' })
+          if (lastCursor && lastCursor !== 0) {
+            sseHeaders['Last-Event-ID'] = String(lastCursor)
+          }
+
           const response = await fetchImpl(sseUrl, {
             signal: abortController.signal,
-            headers: getHeaders({ 'Accept': 'text/event-stream' })
+            headers: sseHeaders
           })
 
           if (!response.ok) {
-            console.warn(`[ApiProvider] SSE failed with status ${response.status}, falling back to polling`)
-            startPolling()
+            console.warn(`[ApiProvider] SSE failed with status ${response.status}, will retry...`)
+            scheduleReconnect()
             return
           }
 
           if (!response.body) {
-            console.warn('[ApiProvider] No response body, falling back to polling')
-            startPolling()
+            console.warn('[ApiProvider] No response body, will retry...')
+            scheduleReconnect()
             return
           }
 
           sseActive = true
+          reconnectDelay = 250 // Reset backoff on successful connection
 
           // Parse SSE stream
           const reader = response.body.getReader()
@@ -114,7 +122,15 @@ export function createApiProvider(config: ApiProviderConfig = {}): EventStreamPr
 
           while (!stopped) {
             const { done, value } = await reader.read()
-            if (done) break
+            if (done) {
+              // Stream ended, reconnect
+              if (!stopped) {
+                console.log('[ApiProvider] SSE stream ended, reconnecting...')
+                sseActive = false
+                scheduleReconnect()
+              }
+              break
+            }
 
             buffer += decoder.decode(value, { stream: true })
 
@@ -178,56 +194,29 @@ export function createApiProvider(config: ApiProviderConfig = {}): EventStreamPr
             return
           }
 
-          console.warn('[ApiProvider] SSE error, falling back to polling:', err.message)
+          console.warn('[ApiProvider] SSE error, will retry:', err.message)
 
           if (!stopped) {
-            startPolling()
+            scheduleReconnect()
           }
         }
       }
 
-      // Polling fallback with backoff
-      const startPolling = () => {
-        if (pollingInterval || stopped || sseActive) return
+      // Schedule SSE reconnect with exponential backoff
+      const scheduleReconnect = () => {
+        if (stopped || reconnectTimeout) return
 
-        const poll = async () => {
-          if (stopped || sseActive) return
-
-          try {
-            const url = `${baseUrl}/api/runs/${runId}/events?after=${lastCursor}&limit=100`
-            const response = await fetchImpl(url, {
-              headers: getHeaders()
-            })
-
-            if (!response.ok) {
-              console.warn(`[ApiProvider] Polling failed: ${response.status}`)
-              // Simple backoff: just wait for next interval
-              return
-            }
-
-            const events: AgentOpsEvent[] = await response.json()
-
-            for (const event of events) {
-              if (stopped || sseActive) break
-
-              if (shouldEmit(event.id)) {
-                onEvent(event)
-                updateCursor(event.id)
-              }
-            }
-          } catch (err: any) {
-            if (!stopped && !sseActive) {
-              console.warn('[ApiProvider] Polling error:', err.message || err)
-              // Backoff: wait one interval before retry
-            }
+        reconnectTimeout = setTimeout(() => {
+          reconnectTimeout = null
+          if (!stopped) {
+            // Reset abort controller for new connection
+            abortController = new AbortController()
+            trySSE()
           }
-        }
+        }, reconnectDelay)
 
-        // Initial poll
-        poll()
-
-        // Set up interval
-        pollingInterval = setInterval(poll, intervalMs)
+        // Exponential backoff: 250ms -> 500ms -> 1000ms -> 2000ms -> 5000ms (cap)
+        reconnectDelay = Math.min(reconnectDelay * 2, 5000)
       }
 
       // Start with SSE
@@ -238,9 +227,9 @@ export function createApiProvider(config: ApiProviderConfig = {}): EventStreamPr
           stopped = true
           abortController.abort()
 
-          if (pollingInterval) {
-            clearInterval(pollingInterval)
-            pollingInterval = null
+          if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout)
+            reconnectTimeout = null
           }
         }
       }

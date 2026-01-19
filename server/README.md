@@ -5,11 +5,15 @@ Minimal Node.js backend server for the Agent Ops Dashboard with SSE streaming su
 ## Features
 
 - REST API for runs and events
-- Server-Sent Events (SSE) for live streaming
+- Server-Sent Events (SSE) for live streaming with auto-reconnect
+- **SSE Resume Support** - Resume streams from last event via Last-Event-ID header
 - SQLite persistence (data survives restarts)
 - Monotonic event IDs via AUTOINCREMENT
 - Event retention policy (configurable)
 - Cursor-based pagination
+- **Health Endpoint** - Monitor server and database health
+- **Request Logging** - Lightweight request/response logging
+- **Run Lifecycle Metadata** - Track completion time, errors, and custom metadata
 - Minimal dependencies (better-sqlite3 only)
 
 ## Getting Started
@@ -42,6 +46,9 @@ The server will start on port 8787 (configurable via `PORT` environment variable
 - `EVENT_RETENTION_MAX` - Maximum events per run (default: 5000)
   - When a run exceeds this limit, oldest events are pruned
   - Set to 0 to disable retention (unlimited)
+- `AGENTOPS_LOG_LEVEL` - Logging level (default: info)
+  - Set to `quiet` to disable request logging
+- `VERSION` - Optional version string for health endpoint (default: dev)
 
 ### Authentication
 
@@ -74,27 +81,68 @@ pnpm -C package dev
 
 ## API Endpoints
 
+### Health
+
+- **GET** `/health` - Server and database health check
+  - Returns server status, timestamp, database status, and version
+  - Requires authentication if `AGENTOPS_API_KEY` is set
+  ```bash
+  curl http://localhost:8787/health
+  ```
+
+  **Response:**
+  ```json
+  {
+    "status": "ok",
+    "time": 1768854394029,
+    "db": "ok",
+    "version": "dev"
+  }
+  ```
+
 ### Runs
 
 - **GET** `/api/runs` - List all runs
+  - Returns array of runs with lifecycle metadata
+  - **Response fields:**
+    - `id` - Run identifier
+    - `title` - Run title
+    - `startedAt` - ISO 8601 timestamp
+    - `status` - Current status (`running`, `completed`, `error`)
+    - `endedAt` - (Optional) ISO 8601 timestamp when run completed/errored
+    - `errorMessage` - (Optional) Error message if status is `error`
+    - `metadata` - (Optional) Custom metadata object
+
 - **POST** `/api/runs` - Create a new run
   ```bash
   curl -X POST http://localhost:8787/api/runs \
     -H "content-type: application/json" \
     -d '{"title":"My Test Run","status":"running"}'
   ```
-- **PATCH** `/api/runs/:runId` - Update run status and/or title
+
+- **PATCH** `/api/runs/:runId` - Update run with lifecycle semantics
   - Supports partial updates (send only fields to update)
   - Returns `404` if run doesn't exist
+  - **Lifecycle semantics:**
+    - When status changes to `completed` or `error`, automatically sets `endedAt` timestamp
+    - `errorMessage` field is stored when provided
+    - `metadata` field accepts any JSON object
+
   ```bash
+  # Mark run as completed
   curl -X PATCH http://localhost:8787/api/runs/<RUN_ID> \
     -H "content-type: application/json" \
     -d '{"status":"completed"}'
 
-  # Update both status and title
+  # Mark run as error with message
   curl -X PATCH http://localhost:8787/api/runs/<RUN_ID> \
     -H "content-type: application/json" \
-    -d '{"status":"error","title":"Failed Run"}'
+    -d '{"status":"error","errorMessage":"Connection timeout"}'
+
+  # Update with custom metadata
+  curl -X PATCH http://localhost:8787/api/runs/<RUN_ID> \
+    -H "content-type: application/json" \
+    -d '{"metadata":{"tags":["experiment","ml"],"cost":0.45}}'
   ```
 
   **Supported status values:** `running`, `completed`, `error`
@@ -110,10 +158,23 @@ pnpm -C package dev
 - **POST** `/api/runs/:runId/events` - Add an event to a run
   - Auto-creates the run if it doesn't exist
   - Returns the created event with assigned ID
+  - **Auto-updates run status** on terminal events:
+    - `type: "run.completed"` → Sets status to `completed` and `endedAt` timestamp
+    - `type: "run.error"` or `type: "error"` → Sets status to `error`, `endedAt`, and `errorMessage` from payload
   ```bash
   curl -X POST http://localhost:8787/api/runs/<RUN_ID>/events \
     -H "content-type: application/json" \
     -d '{"type":"tool.called","payload":{"toolName":"ReadFile","message":"Reading config"}}'
+
+  # Completion event (auto-updates run status)
+  curl -X POST http://localhost:8787/api/runs/<RUN_ID>/events \
+    -H "content-type: application/json" \
+    -d '{"type":"run.completed","payload":{"message":"Finished successfully"}}'
+
+  # Error event (auto-updates run status with error message)
+  curl -X POST http://localhost:8787/api/runs/<RUN_ID>/events \
+    -H "content-type: application/json" \
+    -d '{"type":"run.error","payload":{"message":"Connection timeout"}}'
   ```
 
 ### Streaming (SSE)
@@ -123,12 +184,27 @@ pnpm -C package dev
   - SSE format includes `id:` field for each event (use for cursor tracking)
   - Heartbeat comments every 15 seconds: `: heartbeat <timestamp>`
   - Proper headers: `text/event-stream; charset=utf-8`, `no-cache, no-transform`
+  - **SSE Resume Support:**
+    - Send `Last-Event-ID: <cursor>` header to resume from a specific event
+    - Or use query param: `?after=<cursor>`
+    - Server streams historical events first (capped at 1000), then live events
+    - Prevents duplicate events on reconnect
+
   ```bash
+  # Initial connection
   curl -N http://localhost:8787/api/runs/<RUN_ID>/stream
+
+  # Resume from last event ID 42
+  curl -N -H "Last-Event-ID: 42" http://localhost:8787/api/runs/<RUN_ID>/stream
+
+  # Resume using query parameter
+  curl -N "http://localhost:8787/api/runs/<RUN_ID>/stream?after=42"
   ```
 
 **SSE Event Format:**
 ```
+: connected
+
 id: 123
 data: {"id":"123","runId":"run-xyz","type":"tool.called","ts":"2026-01-19T...","payload":{...}}
 
@@ -220,8 +296,9 @@ const provider = createApiProvider({
 The ApiProvider automatically:
 - Fetches run lists and event history via REST API
 - Attempts SSE streaming for live events
-- Falls back to polling if SSE is not available
-- Handles disconnects and reconnects gracefully
+- **Auto-reconnects** on disconnect with exponential backoff (250ms → 5000ms cap)
+- **Resumes streams** using Last-Event-ID header to prevent duplicate events
+- Tracks last cursor to avoid emitting duplicate events
 - Includes `x-api-key` header in all requests when `apiKey` is configured
 
 ## Database Management
@@ -273,13 +350,19 @@ EVENT_RETENTION_MAX=0 node index.js
 
 ### Database Schema
 
+**Schema Migrations:**
+The server automatically adds new columns on startup if they don't exist (backward compatible migrations).
+
 **runs table:**
 ```sql
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,
   title TEXT,
   started_at INTEGER NOT NULL,   -- epoch milliseconds
-  status TEXT                     -- 'running'|'completed'|'error'
+  status TEXT,                    -- 'running'|'completed'|'error'
+  ended_at INTEGER NULL,          -- epoch milliseconds (auto-set on terminal status)
+  error_message TEXT NULL,        -- error description
+  metadata TEXT NULL              -- JSON string for custom metadata
 );
 ```
 

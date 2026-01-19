@@ -5,6 +5,7 @@ const { Storage } = require('./storage')
 
 const PORT = process.env.PORT || 8787
 const API_KEY = process.env.AGENTOPS_API_KEY
+const LOG_LEVEL = process.env.AGENTOPS_LOG_LEVEL || 'info'
 
 // Initialize database
 const db = new Database()
@@ -60,7 +61,7 @@ function sendError(res, status, message) {
 }
 
 // SSE helper with proper headers and event format
-function setupSSE(req, res, runId) {
+function setupSSE(req, res, runId, parsedUrl) {
   // Check authentication for SSE
   if (!checkAuth(req)) {
     sendError(res, 401, 'unauthorized')
@@ -76,6 +77,30 @@ function setupSSE(req, res, runId) {
 
   // Send initial comment to establish connection
   res.write(`: connected\n\n`)
+
+  // Support SSE resume via Last-Event-ID header or ?after= query param
+  // Last-Event-ID takes precedence (standard SSE header)
+  let lastEventId = req.headers['last-event-id']
+  if (!lastEventId && parsedUrl.query.after) {
+    lastEventId = parsedUrl.query.after
+  }
+
+  // If resuming, stream historical events first (capped to 1000)
+  if (lastEventId) {
+    const afterId = String(lastEventId)
+    const historicalEvents = storage.getEvents(runId, { limit: 1000, after: afterId })
+
+    for (const event of historicalEvents) {
+      try {
+        const jsonStr = JSON.stringify(event)
+        const sanitized = jsonStr.replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+        res.write(`id: ${event.id}\n`)
+        res.write(`data: ${sanitized}\n\n`)
+      } catch (err) {
+        console.error('[SSE] Error streaming historical event:', err)
+      }
+    }
+  }
 
   // Event listener - broadcast with SSE id field
   const listener = (event) => {
@@ -124,6 +149,24 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = url.parse(req.url, true)
   const pathname = parsedUrl.pathname
   const method = req.method
+  const startTime = Date.now()
+
+  // Request logging (unless quiet mode)
+  const logRequest = () => {
+    if (LOG_LEVEL !== 'quiet') {
+      const duration = Date.now() - startTime
+      const status = res.statusCode || 0
+      console.log(`[${new Date().toISOString()}] ${method} ${pathname} ${status} ${duration}ms`)
+    }
+  }
+
+  // Ensure logging happens when response finishes
+  res.on('finish', logRequest)
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      logRequest()
+    }
+  })
 
   // Handle CORS preflight for all /api/* routes
   if (method === 'OPTIONS' && pathname.startsWith('/api/')) {
@@ -137,6 +180,31 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    // GET /health
+    if (pathname === '/health' && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+
+      // Check database health
+      let dbStatus = 'ok'
+      try {
+        db.db.prepare('SELECT 1').get()
+      } catch (err) {
+        dbStatus = 'error'
+        console.error('[Health] Database check failed:', err)
+      }
+
+      sendJSON(res, 200, {
+        status: dbStatus === 'ok' ? 'ok' : 'degraded',
+        time: Date.now(),
+        db: dbStatus,
+        version: process.env.VERSION || 'dev'
+      })
+      return
+    }
+
     // GET /api/runs
     if (pathname === '/api/runs' && method === 'GET') {
       if (!checkAuth(req)) {
@@ -195,6 +263,21 @@ const server = http.createServer(async (req, res) => {
 
       const body = await parseBody(req)
       const event = storage.addEvent(runId, body)
+
+      // Auto-update run status on terminal events
+      if (body.type === 'run.completed') {
+        storage.updateRun(runId, { status: 'completed' })
+      } else if (body.type === 'run.error' || body.type === 'error') {
+        const updates = { status: 'error' }
+        // Extract error message from payload if available
+        if (body.payload && body.payload.message) {
+          updates.errorMessage = body.payload.message
+        } else if (body.payload && body.payload.error) {
+          updates.errorMessage = body.payload.error
+        }
+        storage.updateRun(runId, updates)
+      }
+
       sendJSON(res, 201, event)
       return
     }
@@ -232,7 +315,7 @@ const server = http.createServer(async (req, res) => {
         storage.createRun({ id: runId, title: `Run ${runId}` })
       }
 
-      setupSSE(req, res, runId)
+      setupSSE(req, res, runId, parsedUrl)
       return
     }
 
@@ -251,6 +334,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`🚀 Agent Ops Dashboard Server running on http://localhost:${PORT}`)
   console.log(`   API endpoints:`)
+  console.log(`   - GET   /health`)
   console.log(`   - GET   /api/runs`)
   console.log(`   - POST  /api/runs`)
   console.log(`   - PATCH /api/runs/:runId`)
@@ -260,6 +344,7 @@ server.listen(PORT, () => {
   console.log(``)
   console.log(`   Cursor: Use 'after' param with event ID to fetch only newer events`)
   console.log(`   SSE: Events include 'id:' field for cursor tracking`)
+  console.log(`   SSE Resume: Send Last-Event-ID header or ?after= to resume from cursor`)
 
   if (API_KEY) {
     console.log(``)

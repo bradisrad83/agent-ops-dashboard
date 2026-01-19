@@ -36,6 +36,33 @@ class Database {
   }
 
   /**
+   * Run schema migrations (additive only)
+   */
+  runMigrations() {
+    // Get current columns in runs table
+    const columns = this.db.pragma('table_info(runs)')
+    const columnNames = columns.map(col => col.name)
+
+    // Add ended_at column if missing
+    if (!columnNames.includes('ended_at')) {
+      console.log('[DB] Migration: Adding ended_at column to runs table')
+      this.db.exec('ALTER TABLE runs ADD COLUMN ended_at INTEGER NULL')
+    }
+
+    // Add error_message column if missing
+    if (!columnNames.includes('error_message')) {
+      console.log('[DB] Migration: Adding error_message column to runs table')
+      this.db.exec('ALTER TABLE runs ADD COLUMN error_message TEXT NULL')
+    }
+
+    // Add metadata column if missing
+    if (!columnNames.includes('metadata')) {
+      console.log('[DB] Migration: Adding metadata column to runs table')
+      this.db.exec('ALTER TABLE runs ADD COLUMN metadata TEXT NULL')
+    }
+  }
+
+  /**
    * Initialize database schema
    */
   initDb() {
@@ -74,6 +101,9 @@ class Database {
       CREATE INDEX IF NOT EXISTS idx_events_run_id_id ON events(run_id, id);
     `)
 
+    // Run migrations to add new columns if they don't exist
+    this.runMigrations()
+
     console.log(`[DB] Initialized database at ${this.dbPath}`)
     console.log(`[DB] Event retention: ${this.retentionMax} events per run`)
 
@@ -111,12 +141,33 @@ class Database {
     const stmt = this.db.prepare('SELECT * FROM runs ORDER BY started_at DESC')
     const rows = stmt.all()
 
-    return rows.map(row => ({
-      id: row.id,
-      title: row.title,
-      startedAt: new Date(row.started_at).toISOString(),
-      status: row.status
-    }))
+    return rows.map(row => {
+      const result = {
+        id: row.id,
+        title: row.title,
+        startedAt: new Date(row.started_at).toISOString(),
+        status: row.status
+      }
+
+      // Add optional fields if present
+      if (row.ended_at) {
+        result.endedAt = new Date(row.ended_at).toISOString()
+      }
+
+      if (row.error_message) {
+        result.errorMessage = row.error_message
+      }
+
+      if (row.metadata) {
+        try {
+          result.metadata = JSON.parse(row.metadata)
+        } catch {
+          // Invalid JSON, skip
+        }
+      }
+
+      return result
+    })
   }
 
   /**
@@ -128,22 +179,41 @@ class Database {
 
     if (!row) return null
 
-    return {
+    const result = {
       id: row.id,
       title: row.title,
       startedAt: new Date(row.started_at).toISOString(),
       status: row.status
     }
+
+    // Add optional fields if present
+    if (row.ended_at) {
+      result.endedAt = new Date(row.ended_at).toISOString()
+    }
+
+    if (row.error_message) {
+      result.errorMessage = row.error_message
+    }
+
+    if (row.metadata) {
+      try {
+        result.metadata = JSON.parse(row.metadata)
+      } catch {
+        // Invalid JSON, skip
+      }
+    }
+
+    return result
   }
 
   /**
-   * Update run fields (status and/or title)
+   * Update run fields with lifecycle semantics
    */
   updateRun(runId, updates) {
     const currentRun = this.getRun(runId)
     if (!currentRun) return null
 
-    const { title, status } = updates
+    const { title, status, errorMessage, metadata } = updates
 
     // Build dynamic update query
     const fields = []
@@ -157,6 +227,22 @@ class Database {
     if (status !== undefined) {
       fields.push('status = ?')
       values.push(status)
+
+      // Lifecycle semantics: set ended_at when transitioning to terminal state
+      if ((status === 'completed' || status === 'error') && !currentRun.endedAt) {
+        fields.push('ended_at = ?')
+        values.push(Date.now())
+      }
+    }
+
+    if (errorMessage !== undefined) {
+      fields.push('error_message = ?')
+      values.push(errorMessage)
+    }
+
+    if (metadata !== undefined) {
+      fields.push('metadata = ?')
+      values.push(typeof metadata === 'string' ? metadata : JSON.stringify(metadata))
     }
 
     if (fields.length === 0) {
