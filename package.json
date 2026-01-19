@@ -1,0 +1,13 @@
+{
+  "name": "agent-ops-dashboard-monorepo",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "package",
+    "playground"
+  ],
+  "scripts": {
+    "dev": "pnpm -C playground dev",
+    "build": "pnpm -C package build"
+  }
+}
