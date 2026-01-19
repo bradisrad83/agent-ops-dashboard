@@ -48,7 +48,7 @@ export function createMockEventStream(options: MockStreamOptions): MockStreamCon
 
     return {
       id: `evt-${++eventCounter}`,
-      ts: Date.now(),
+      ts: new Date().toISOString(),
       runId: currentRunId,
       agentId,
       type,
