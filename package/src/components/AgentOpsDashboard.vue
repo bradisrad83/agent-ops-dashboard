@@ -31,7 +31,38 @@
           <span class="aod-count">{{ filteredEvents.length }} events</span>
         </div>
 
-        <div class="aod-events">
+        <div class="aod-toolbar">
+          <button
+            :class="['aod-toolbar-btn', { 'aod-toolbar-btn-active': isPaused }]"
+            @click="togglePause"
+            :title="isPaused ? 'Resume event stream' : 'Pause event stream'"
+          >
+            {{ isPaused ? '▶ Resume' : '⏸ Pause' }}
+          </button>
+          <button
+            class="aod-toolbar-btn"
+            @click="clearEvents"
+            title="Clear all events"
+          >
+            🗑 Clear
+          </button>
+          <button
+            class="aod-toolbar-btn"
+            @click="exportJSON"
+            title="Export filtered events as JSON"
+          >
+            ⬇ Export JSON
+          </button>
+          <button
+            :class="['aod-toolbar-btn', { 'aod-toolbar-btn-active': autoScroll }]"
+            @click="toggleAutoScroll"
+            :title="autoScroll ? 'Disable auto-scroll' : 'Enable auto-scroll'"
+          >
+            {{ autoScroll ? '🔽 Auto-scroll: ON' : '🔽 Auto-scroll: OFF' }}
+          </button>
+        </div>
+
+        <div class="aod-events" ref="eventListRef">
           <div
             v-for="event in filteredEvents"
             :key="event.id"
@@ -85,6 +116,9 @@ const events = ref<AgentOpsEvent[]>([])
 const selectedEvent = ref<AgentOpsEvent | null>(null)
 const searchQuery = ref<string>('')
 const selectedTypePrefix = ref<string>('all')
+const isPaused = ref<boolean>(false)
+const autoScroll = ref<boolean>(true)
+const eventListRef = ref<HTMLElement | null>(null)
 
 let streamControl: EventStreamControl | null = null
 
@@ -150,14 +184,50 @@ const filteredEvents = computed(() => {
   })
 })
 
+const togglePause = () => {
+  isPaused.value = !isPaused.value
+}
+
+const clearEvents = () => {
+  events.value = []
+  selectedEvent.value = null
+}
+
+const exportJSON = () => {
+  const dataStr = JSON.stringify(filteredEvents.value, null, 2)
+  const dataBlob = new Blob([dataStr], { type: 'application/json' })
+  const url = URL.createObjectURL(dataBlob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'agent-ops-events.json'
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+const toggleAutoScroll = () => {
+  autoScroll.value = !autoScroll.value
+}
+
+const scrollToBottom = () => {
+  if (eventListRef.value && autoScroll.value) {
+    eventListRef.value.scrollTop = eventListRef.value.scrollHeight
+  }
+}
+
 onMounted(() => {
   streamControl = props.provider.connect({
     runId: props.runId,
     intervalMs: props.intervalMs,
     onEvent: (event) => {
-      events.value.push(event)
-      if (events.value.length > props.maxEvents) {
-        events.value.shift()
+      // Only append events when not paused
+      if (!isPaused.value) {
+        events.value.push(event)
+        if (events.value.length > props.maxEvents) {
+          events.value.shift()
+        }
+
+        // Auto-scroll to bottom if enabled
+        setTimeout(() => scrollToBottom(), 0)
       }
     }
   })
@@ -301,6 +371,49 @@ onUnmounted(() => {
 .aod-search:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+/* Toolbar */
+.aod-toolbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--bg);
+}
+
+.aod-toolbar-btn {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.aod-toolbar-btn:hover {
+  background: var(--bg);
+  border-color: var(--text-secondary);
+}
+
+.aod-toolbar-btn-active {
+  background: var(--accent-light);
+  color: var(--accent-hover);
+  border-color: var(--accent);
+}
+
+.aod-toolbar-btn-active:hover {
+  background: var(--accent-light);
+  border-color: var(--accent-hover);
 }
 
 /* Filter Chips */
