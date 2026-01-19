@@ -6,11 +6,14 @@ export type AgentId =
 
 export type EventType =
   | "run.started"
+  | "run.completed"
+  | "run.error"
   | "task.progress"
   | "tool.called"
   | "tool.result"
   | "artifact.produced"
-  | "run.completed"
+  | "fs.changed"
+  | "git.diff"
   | "error";
 
 export type EventLevel = "debug" | "info" | "warn" | "error";
