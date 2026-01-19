@@ -21,4 +21,7 @@ export type {
   EventStreamProvider,
   EventStreamOptions,
   EventStreamControl,
+  RunSummary
 } from "./client/provider";
+
+

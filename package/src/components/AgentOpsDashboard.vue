@@ -5,7 +5,39 @@
       <div class="aod-subtitle">v0.1 — event-driven UI</div>
     </div>
 
-    <div class="aod-grid">
+    <div class="aod-grid" :class="{ 'aod-grid-with-runs': props.showRuns }">
+      <!-- Runs Sidebar -->
+      <aside v-if="props.showRuns" class="aod-panel aod-runs-sidebar">
+        <div class="aod-panel-title">Runs</div>
+
+        <!-- Loading state -->
+        <div v-if="runsLoading" class="aod-runs-loading">
+          <div class="aod-muted">Loading runs...</div>
+        </div>
+
+        <!-- Empty state -->
+        <div v-else-if="runs.length === 0" class="aod-runs-empty">
+          <div class="aod-muted">No runs available</div>
+        </div>
+
+        <!-- Runs list -->
+        <div v-else class="aod-runs-list">
+          <div
+            v-for="run in runs"
+            :key="run.id"
+            :class="['aod-run-row', { 'aod-run-row-selected': selectedRunId === run.id }]"
+            :data-run-status="run.status || 'running'"
+            @click="selectedRunId = run.id"
+          >
+            <div class="aod-run-header">
+              <span class="aod-run-status-dot" :data-status="run.status || 'running'"></span>
+              <span class="aod-run-time">{{ formatTimeHHMM(run.startedAt) }}</span>
+            </div>
+            <div class="aod-run-title">{{ run.title || run.id }}</div>
+          </div>
+        </div>
+      </aside>
+
       <main class="aod-panel aod-main">
         <div class="aod-panel-title">Event Stream</div>
 
@@ -94,9 +126,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import type { AgentOpsEvent, EventType } from '../types/events'
-import type { EventStreamControl, EventStreamProvider } from '../client/provider'
+import type { EventStreamControl, EventStreamProvider, RunSummary } from '../client/provider'
 import { mockProvider } from '../client/mockProvider'
 
 interface Props {
@@ -104,12 +136,16 @@ interface Props {
   runId?: string
   intervalMs?: number
   maxEvents?: number
+  showRuns?: boolean
+  initialRunId?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
   provider: () => mockProvider,
   intervalMs: 1000,
-  maxEvents: 100
+  maxEvents: 100,
+  showRuns: true,
+  initialRunId: 'default'
 })
 
 const events = ref<AgentOpsEvent[]>([])
@@ -119,6 +155,11 @@ const selectedTypePrefix = ref<string>('all')
 const isPaused = ref<boolean>(false)
 const autoScroll = ref<boolean>(true)
 const eventListRef = ref<HTMLElement | null>(null)
+
+// Run selection state
+const runs = ref<RunSummary[]>([])
+const runsLoading = ref<boolean>(false)
+const selectedRunId = ref<string>(props.initialRunId)
 
 let streamControl: EventStreamControl | null = null
 
@@ -133,6 +174,11 @@ const getTypePrefix = (type: string): string => {
 const formatTime = (ts: string): string => {
   const date = new Date(ts)
   return date.toLocaleTimeString('en-US', { hour12: false })
+}
+
+const formatTimeHHMM = (ts: string): string => {
+  const date = new Date(ts)
+  return date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })
 }
 
 const getSummary = (event: AgentOpsEvent): string => {
@@ -214,23 +260,91 @@ const scrollToBottom = () => {
   }
 }
 
-onMounted(() => {
-  streamControl = props.provider.connect({
-    runId: props.runId,
-    intervalMs: props.intervalMs,
-    onEvent: (event) => {
-      // Only append events when not paused
-      if (!isPaused.value) {
-        events.value.push(event)
-        if (events.value.length > props.maxEvents) {
-          events.value.shift()
-        }
+const connectStream = (runId: string) => {
+  // Stop any existing stream
+  if (streamControl) {
+    streamControl.stop()
+    streamControl = null
+  }
 
-        // Auto-scroll to bottom if enabled
-        setTimeout(() => scrollToBottom(), 0)
+  // Clear events and selection
+  events.value = []
+  selectedEvent.value = null
+
+  // Load history events if listEvents exists
+  const loadHistoryAndConnect = async () => {
+    if (props.provider.listEvents) {
+      try {
+        const historyEvents = await props.provider.listEvents(runId)
+        // Apply maxEvents cap to history
+        const cappedHistory = historyEvents.slice(-props.maxEvents)
+        events.value = cappedHistory
+      } catch (error) {
+        console.error('Failed to load event history:', error)
       }
     }
-  })
+
+    // Connect live stream
+    streamControl = props.provider.connect({
+      runId,
+      intervalMs: props.intervalMs,
+      onEvent: (event) => {
+        // Only append events when not paused
+        if (!isPaused.value) {
+          events.value.push(event)
+          if (events.value.length > props.maxEvents) {
+            events.value.shift()
+          }
+
+          // Auto-scroll to bottom if enabled
+          setTimeout(() => scrollToBottom(), 0)
+        }
+      }
+    })
+  }
+
+  loadHistoryAndConnect()
+}
+
+// Watch selectedRunId to reconnect stream
+watch(selectedRunId, (newRunId) => {
+  connectStream(newRunId)
+})
+
+onMounted(async () => {
+  // Load runs if listRuns exists
+  if (props.provider.listRuns) {
+    runsLoading.value = true
+    try {
+      runs.value = await props.provider.listRuns()
+
+      // Choose selectedRunId in order:
+      // 1. If initialRunId exists in runs list, use it
+      // 2. Else use the first run in the list
+      // 3. Else fallback to "default"
+      const initialRunExists = runs.value.some(run => run.id === props.initialRunId)
+      if (initialRunExists) {
+        selectedRunId.value = props.initialRunId
+      } else if (runs.value.length > 0) {
+        selectedRunId.value = runs.value[0].id
+      } else {
+        selectedRunId.value = 'default'
+      }
+    } catch (error) {
+      console.error('Failed to load runs:', error)
+      selectedRunId.value = props.initialRunId
+    } finally {
+      runsLoading.value = false
+    }
+  } else {
+    // No listRuns, use initialRunId
+    selectedRunId.value = props.initialRunId
+  }
+
+  // Initial connection (watch will handle it if listRuns exists)
+  if (!props.provider.listRuns) {
+    connectStream(selectedRunId.value)
+  }
 })
 
 onUnmounted(() => {
@@ -317,6 +431,10 @@ onUnmounted(() => {
   gap: 0;
   flex: 1;
   overflow: hidden;
+}
+
+.aod-grid-with-runs {
+  grid-template-columns: 280px 1fr 400px;
 }
 
 .aod-panel {
@@ -580,5 +698,98 @@ onUnmounted(() => {
   color: var(--muted);
   font-size: var(--text-base);
   font-style: italic;
+}
+
+/* Runs Sidebar */
+.aod-runs-sidebar {
+  border-right: 1px solid var(--border);
+}
+
+.aod-runs-loading,
+.aod-runs-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.aod-runs-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.aod-run-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background 0.1s;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aod-run-row:hover {
+  background: var(--bg);
+}
+
+.aod-run-row-selected {
+  background: var(--accent-light);
+  border-left: 3px solid var(--accent);
+  padding-left: 13px;
+}
+
+.aod-run-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.aod-run-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.aod-run-status-dot[data-status="running"] {
+  background: #10b981;
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.aod-run-status-dot[data-status="completed"] {
+  background: var(--accent);
+}
+
+.aod-run-status-dot[data-status="error"] {
+  background: #ef4444;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.aod-run-time {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
+.aod-run-title {
+  font-size: var(--text-sm);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.aod-run-row-selected .aod-run-title {
+  color: var(--accent-hover);
+  font-weight: 500;
 }
 </style>
