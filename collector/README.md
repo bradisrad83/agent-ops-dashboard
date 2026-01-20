@@ -14,6 +14,28 @@ CLI tool to collect file changes, git diffs, and command execution events for th
 
 ## Installation
 
+### Install in Any Repo (Recommended)
+
+Install as a dev dependency in your project:
+
+```bash
+# From npm (once published)
+npm install -D @agentops/collector
+
+# Or locally during development
+npm install -D /path/to/agent-ops-dashboard/collector
+```
+
+Initialize AgentOps in your repo:
+
+```bash
+npx agentops init
+```
+
+This creates:
+- `.agentops/config.json` - Repo-local configuration
+- `.agentops/` entry in `.gitignore` - Ensures session files stay local
+
 ### Local Development
 
 From the repo root:
@@ -30,21 +52,39 @@ chmod +x index.js
 npm link
 ```
 
-### As Dependency in Another Project
-
-```bash
-npm install -D /path/to/agent-ops-dashboard/collector
-```
-
-Or once published:
-
-```bash
-npm install -D @agent-ops/collector
-```
-
 ## Quick Start
 
-### 1. Start the Agent Ops Server
+### For a New Project
+
+```bash
+# 1. Install in your project
+npm install -D @agentops/collector
+
+# 2. Initialize config
+npx agentops init
+
+# 3. Start a session
+npx agentops start
+
+# 4. Watch for changes (optional)
+npx agentops watch
+
+# 5. Log your work
+npx agentops note "Working on authentication"
+npx agentops prompt "Implement JWT auth"
+
+# 6. Open dashboard
+npx agentops open
+
+# 7. Stop when done
+npx agentops stop
+```
+
+### With Server Running Locally
+
+If you're running the Agent Ops server and dashboard locally:
+
+#### 1. Start the Agent Ops Server
 
 From the repo root:
 
@@ -56,7 +96,7 @@ node index.js
 
 The server will start on `http://localhost:8787` by default.
 
-### 2. Start the Dashboard UI
+#### 2. Start the Dashboard UI
 
 In another terminal:
 
@@ -68,21 +108,100 @@ npm run dev
 
 Open the dashboard in your browser (typically `http://localhost:5173`).
 
-### 3. Run the Collector
+#### 3. Initialize and Use Collector
 
 In your project directory:
 
 ```bash
-# Watch mode (default)
-agentops watch
+# Initialize (creates config file)
+npx agentops init
 
-# Or with explicit command
-agentops watch --title "My Project Watch"
+# Start a session
+npx agentops start
+
+# Watch for changes
+npx agentops watch
 ```
 
 You should now see events appearing live in the dashboard!
 
 ## Commands
+
+### Configuration
+
+#### `init` - Initialize AgentOps
+
+Initializes AgentOps in your repository by creating a config file and updating `.gitignore`.
+
+```bash
+agentops init [options]
+```
+
+**Options:**
+
+- `--server <url>` - Server URL (default: `http://localhost:8787`)
+- `--dashboardUrl <url>` - Dashboard URL (default: `http://localhost:5173`)
+- `--yes` - Overwrite existing config file
+
+**Examples:**
+
+```bash
+# Initialize with defaults
+npx agentops init
+
+# Initialize with custom server
+npx agentops init --server https://agentops.mycompany.com
+
+# Overwrite existing config
+npx agentops init --yes
+```
+
+**What it does:**
+
+1. Creates `.agentops/` directory
+2. Creates `.agentops/config.json` with default settings
+3. Adds `.agentops/` to `.gitignore`
+4. Displays next steps
+
+#### Config File
+
+The config file (`.agentops/config.json` or `.agentops/config.jsonc`) allows you to set defaults for your repo:
+
+```json
+{
+  "server": "http://localhost:8787",
+  "dashboardUrl": "http://localhost:5173",
+  "defaultTitle": "Claude Session",
+  "watch": {
+    "mode": "auto",
+    "path": ".",
+    "ignore": ["node_modules", ".git", "dist", "build", "coverage"],
+    "diffInterval": 5000,
+    "pollInterval": 1000,
+    "batchWindowMs": 250
+  },
+  "redact": true,
+  "toolDefaults": {
+    "tool": "claude-code",
+    "model": "sonnet"
+  }
+}
+```
+
+**Config priority:** CLI flags > config file > defaults
+
+**Config file locations (checked in order):**
+
+1. `.agentops/config.json`
+2. `.agentops/config.jsonc` (supports `//` line comments)
+3. `agentops.config.json`
+
+**Auto-session attachment:**
+
+When you have an active session (from `agentops start`), all commands automatically use it:
+- `watch`, `exec`, `note`, `prompt`, `response`, `clip`, `tail`, `open`, `copy`
+- No need to pass `--runId` or `--server` flags
+- Commands read from `.agentops/run.json` automatically
 
 ### Session Workflow (Claude Code Integration)
 

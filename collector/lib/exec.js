@@ -9,7 +9,7 @@ async function execCommand(commandArgs, options) {
     process.exit(1);
   }
 
-  const server = options.server || 'http://localhost:8787';
+  const server = options.server;
   const apiKey = options.apiKey || null;
   const runId = options.runId || null;
   const verbose = options.verbose || false;

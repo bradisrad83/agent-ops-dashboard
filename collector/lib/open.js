@@ -3,7 +3,7 @@ const os = require('os');
 const { SessionManager } = require('./session');
 
 function buildDashboardUrl(runId, options) {
-  const baseUrl = options.dashboardUrl || process.env.AGENTOPS_DASHBOARD_URL || 'http://localhost:5173';
+  const baseUrl = options.dashboardUrl || 'http://localhost:5173';
 
   // Add runId as query parameter
   const url = new URL(baseUrl);
@@ -43,18 +43,8 @@ function openUrl(url) {
 }
 
 async function openCommand(options) {
-  const repoRoot = SessionManager.getRepoRoot();
-  const sessionManager = new SessionManager(repoRoot);
-
-  let runId = options.runId;
-  let server = options.server;
-
-  // Try to get from active session if not provided
-  if (!runId && sessionManager.hasActiveSession()) {
-    const session = sessionManager.loadSession();
-    runId = session.runId;
-    server = server || session.server;
-  }
+  const runId = options.runId;
+  const server = options.server;
 
   if (!runId) {
     console.error('Error: No active session found and no --runId provided');

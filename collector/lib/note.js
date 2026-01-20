@@ -16,14 +16,9 @@ async function noteCommand(args, options) {
   const repoRoot = SessionManager.getRepoRoot();
   const sessionManager = new SessionManager(repoRoot);
 
-  let session = null;
-  if (!options.runId && sessionManager.hasActiveSession()) {
-    session = sessionManager.loadSession();
-  }
-
-  const server = options.server || (session ? session.server : 'http://localhost:8787');
+  const server = options.server;
   const apiKey = options.apiKey || null;
-  const runId = options.runId || (session ? session.runId : null);
+  const runId = options.runId;
 
   if (!runId) {
     console.error('Error: No active session found and no --runId provided');

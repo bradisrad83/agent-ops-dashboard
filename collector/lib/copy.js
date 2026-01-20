@@ -3,16 +3,7 @@ const { SessionManager } = require('./session');
 const { buildDashboardUrl } = require('./open');
 
 async function copyCommand(options) {
-  const repoRoot = SessionManager.getRepoRoot();
-  const sessionManager = new SessionManager(repoRoot);
-
-  let runId = options.runId;
-
-  // Try to get from active session if not provided
-  if (!runId && sessionManager.hasActiveSession()) {
-    const session = sessionManager.loadSession();
-    runId = session.runId;
-  }
+  const runId = options.runId;
 
   if (!runId) {
     console.error('Error: No active session found and no --runId provided');

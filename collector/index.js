@@ -15,11 +15,15 @@ const { copyCommand } = require('./lib/copy');
 const { tailCommand } = require('./lib/tail');
 const { vscodeLogsCommand } = require('./lib/vscode-logs');
 const { vscodeTailCommand } = require('./lib/vscode-tail');
+const { initCommand } = require('./lib/init');
+const { loadConfig, mergeConfig } = require('./lib/config');
+const { SessionManager } = require('./lib/session');
 
 const HELP_TEXT = `
 Agent Ops Collector CLI
 
 Usage:
+  agentops init [options]
   agentops watch [options]
   agentops exec [options] -- <command> [args...]
   agentops start [options]
@@ -36,6 +40,7 @@ Usage:
   agentops vscode tail [options]
 
 Commands:
+  init        Initialize AgentOps in a repo (creates config + gitignore)
   watch       Watch filesystem for changes and emit events
   exec        Execute a command and capture output
   start       Start a new session
@@ -52,6 +57,11 @@ Commands:
   vscode tail Tail VS Code logs (auto-detect or specify file)
 
 Session Commands:
+  init [options]
+    --server <url>       Server URL (default: http://localhost:8787)
+    --dashboardUrl <url> Dashboard URL (default: http://localhost:5173)
+    --yes                Overwrite existing config file
+
   start [options]
     --title <title>      Session title (default: repo name + date)
     --server <url>       Server URL (default: http://localhost:8787)
@@ -169,6 +179,9 @@ Exec Options:
   --verbose              Enable verbose logging
 
 Examples:
+  # Initialize in a new repo
+  agentops init
+
   # Start a session
   agentops start --title "Claude Session"
 
@@ -228,63 +241,81 @@ function main() {
 
   const parsed = parseArgs(args);
 
-  if (parsed.command === 'watch') {
-    watchCommand(parsed.options).catch((err) => {
+  // Load config and session data
+  const repoRoot = SessionManager.getRepoRoot();
+  const { config, configPath } = loadConfig(repoRoot);
+
+  // Load active session if exists
+  const sessionManager = new SessionManager(repoRoot);
+  const sessionData = sessionManager.hasActiveSession()
+    ? sessionManager.loadSession()
+    : null;
+
+  // Merge config with CLI options and session data
+  const options = mergeConfig(parsed.options, config, sessionData);
+
+  if (parsed.command === 'init') {
+    initCommand(options).catch((err) => {
+      console.error('Init command failed:', err.message);
+      process.exit(1);
+    });
+  } else if (parsed.command === 'watch') {
+    watchCommand(options).catch((err) => {
       console.error('Watch command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'exec') {
-    execCommand(parsed.commandArgs, parsed.options).catch((err) => {
+    execCommand(parsed.commandArgs, options).catch((err) => {
       console.error('Exec command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'start') {
-    startCommand(parsed.options).catch((err) => {
+    startCommand(options).catch((err) => {
       console.error('Start command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'stop') {
-    stopCommand(parsed.options).catch((err) => {
+    stopCommand(options).catch((err) => {
       console.error('Stop command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'note') {
-    noteCommand(parsed.commandArgs, parsed.options).catch((err) => {
+    noteCommand(parsed.commandArgs, options).catch((err) => {
       console.error('Note command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'prompt') {
-    promptCommand(parsed.commandArgs, parsed.options).catch((err) => {
+    promptCommand(parsed.commandArgs, options).catch((err) => {
       console.error('Prompt command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'response') {
-    responseCommand(parsed.commandArgs, parsed.options).catch((err) => {
+    responseCommand(parsed.commandArgs, options).catch((err) => {
       console.error('Response command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'status') {
-    statusCommand(parsed.options).catch((err) => {
+    statusCommand(options).catch((err) => {
       console.error('Status command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'open') {
-    openCommand(parsed.options).catch((err) => {
+    openCommand(options).catch((err) => {
       console.error('Open command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'clip') {
-    clipCommand(parsed.commandArgs, parsed.options).catch((err) => {
+    clipCommand(parsed.commandArgs, options).catch((err) => {
       console.error('Clip command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'copy') {
-    copyCommand(parsed.options).catch((err) => {
+    copyCommand(options).catch((err) => {
       console.error('Copy command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'tail') {
-    tailCommand(parsed.options).catch((err) => {
+    tailCommand(options).catch((err) => {
       console.error('Tail command failed:', err.message);
       process.exit(1);
     });
@@ -292,12 +323,12 @@ function main() {
     // Handle vscode subcommands
     const subcommand = parsed.commandArgs[0];
     if (subcommand === 'logs') {
-      vscodeLogsCommand(parsed.options).catch((err) => {
+      vscodeLogsCommand(options).catch((err) => {
         console.error('VS Code logs command failed:', err.message);
         process.exit(1);
       });
     } else if (subcommand === 'tail') {
-      vscodeTailCommand(parsed.options).catch((err) => {
+      vscodeTailCommand(options).catch((err) => {
         console.error('VS Code tail command failed:', err.message);
         process.exit(1);
       });

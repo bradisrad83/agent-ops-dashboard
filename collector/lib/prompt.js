@@ -15,14 +15,9 @@ async function promptCommand(args, options) {
   const repoRoot = SessionManager.getRepoRoot();
   const sessionManager = new SessionManager(repoRoot);
 
-  let session = null;
-  if (!options.runId && sessionManager.hasActiveSession()) {
-    session = sessionManager.loadSession();
-  }
-
-  const server = options.server || (session ? session.server : 'http://localhost:8787');
+  const server = options.server;
   const apiKey = options.apiKey || null;
-  const runId = options.runId || (session ? session.runId : null);
+  const runId = options.runId;
 
   if (!runId) {
     console.error('Error: No active session found and no --runId provided');
@@ -50,8 +45,8 @@ async function promptCommand(args, options) {
     process.exit(1);
   }
 
-  const tool = options.tool || null;
-  const model = options.model || null;
+  const tool = options.tool || options.toolDefaults?.tool || null;
+  const model = options.model || options.toolDefaults?.model || null;
   const tags = [];
   if (options.tag) {
     if (Array.isArray(options.tag)) {

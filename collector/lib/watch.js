@@ -7,22 +7,34 @@ const { PollingWatcher } = require('./polling-watcher');
 const { GitMonitor } = require('./git');
 
 async function watchCommand(options) {
-  const server = options.server || 'http://localhost:8787';
+  const server = options.server;
   const title = options.title || 'Workspace Watch';
-  const watchPath = path.resolve(options.path || '.');
-  const ignoreList = options.ignore
-    ? options.ignore.split(',').map(s => s.trim())
-    : ['node_modules', '.git', 'dist', 'build', 'coverage'];
-  const diffInterval = parseInt(options.diffInterval || '5000', 10);
+  const watchPath = path.resolve(options.watch?.path || options.path || '.');
+  const ignoreList = Array.isArray(options.watch?.ignore)
+    ? options.watch.ignore
+    : (options.ignore
+      ? options.ignore.split(',').map(s => s.trim())
+      : ['node_modules', '.git', 'dist', 'build', 'coverage']);
+  const diffInterval = options.watch?.diffInterval || 5000;
   const apiKey = options.apiKey || null;
   const runId = options.runId || null;
   const verbose = options.verbose || false;
-  const noComplete = options.noComplete || false;
+  let noComplete = options.noComplete || false;
+
+  // C2: Session-aware watch
+  // If active session exists and user didn't explicitly set --noComplete,
+  // default to --noComplete automatically (so watch doesn't complete the session run)
+  if (runId && options.noComplete === undefined) {
+    noComplete = true;
+    console.log('Active session detected: watch will not complete the session when stopped.');
+    console.log('Use explicit --noComplete=false to override this behavior.');
+    console.log('');
+  }
 
   // New options for watch modes
-  const mode = options.mode || 'auto'; // 'native', 'poll', or 'auto'
-  const pollInterval = parseInt(options.pollInterval || '1000', 10);
-  const noBatch = options.noBatch || false;
+  const mode = options.watch?.mode || options.mode || 'auto'; // 'native', 'poll', or 'auto'
+  const pollInterval = options.watch?.pollInterval || 1000;
+  const noBatch = options.noBatch || options.watch?.noBatch || false;
 
   const client = new ApiClient(server, apiKey);
 

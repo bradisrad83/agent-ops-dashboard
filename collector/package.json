@@ -1,5 +1,5 @@
 {
-  "name": "@agent-ops/collector",
+  "name": "@agentops/collector",
   "version": "0.1.0",
   "description": "CLI tool to collect file changes, git diffs, and command execution events for Agent Ops Dashboard",
   "type": "commonjs",
@@ -10,7 +10,8 @@
   "files": [
     "index.js",
     "lib/**/*.js",
-    "README.md"
+    "README.md",
+    "QUICKSTART.md"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -20,12 +21,19 @@
     "monitoring",
     "cli",
     "file-watcher",
-    "git-diff"
+    "git-diff",
+    "claude",
+    "ai-agents"
   ],
   "author": "",
   "license": "MIT",
   "engines": {
     "node": ">=14.0.0"
   },
-  "dependencies": {}
+  "dependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/agent-ops-dashboard.git",
+    "directory": "collector"
+  }
 }

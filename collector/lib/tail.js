@@ -165,17 +165,16 @@ async function tailCommand(options) {
   }
 
   // Setup API client and session
-  const repoRoot = SessionManager.getRepoRoot();
-  const sessionManager = new SessionManager(repoRoot);
-  const session = options.runId ? { runId: options.runId } : sessionManager.loadSession();
+  const serverUrl = options.server;
+  const apiKey = options.apiKey;
+  const runId = options.runId;
 
-  if (!session) {
+  if (!runId) {
     console.error('Error: No active session. Use --runId or run "agentops start" first.');
     process.exit(1);
   }
 
-  const serverUrl = options.server || session.server || 'http://localhost:8787';
-  const apiKey = options.apiKey || session.apiKey;
+  const session = { runId, server: serverUrl };
   const client = new ApiClient(serverUrl, apiKey);
 
   console.log(`Tailing: ${filePath}`);

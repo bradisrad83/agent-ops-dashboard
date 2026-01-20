@@ -3,13 +3,13 @@ const { ApiClient } = require('./client');
 const { SessionManager } = require('./session');
 
 async function startCommand(options) {
-  const server = options.server || 'http://localhost:8787';
+  const server = options.server;
   const apiKey = options.apiKey || null;
   const repoRoot = SessionManager.getRepoRoot();
   const repoName = SessionManager.getRepoName(repoRoot);
   const branch = SessionManager.getBranch();
 
-  const defaultTitle = `${repoName} - ${new Date().toISOString().split('T')[0]}`;
+  const defaultTitle = options.defaultTitle || `${repoName} - ${new Date().toISOString().split('T')[0]}`;
   const title = options.title || defaultTitle;
 
   const sessionManager = new SessionManager(repoRoot);

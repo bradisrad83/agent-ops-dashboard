@@ -1,108 +1,124 @@
-# Agent Ops Collector - Quick Start
+# AgentOps Collector - Quick Start
 
 ## Installation
 
+Install in any repo:
+
 ```bash
-cd /path/to/agent-ops-dashboard/collector
-chmod +x index.js
-npm link  # Optional: make 'agentops' available globally
+npm install -D @agentops/collector
 ```
 
-## Prerequisites
+## Initialize
+
+Create config file (one time per repo):
+
+```bash
+npx agentops init
+```
+
+This creates:
+- `.agentops/config.json` - Repo settings
+- Adds `.agentops/` to `.gitignore`
+
+## Prerequisites (Optional)
+
+If running server locally:
 
 1. **Start the server:**
    ```bash
-   cd ../server
+   cd /path/to/agent-ops-dashboard/server
    node index.js
    # Server runs on http://localhost:8787
    ```
 
 2. **Start the dashboard (optional, for visual feedback):**
    ```bash
-   cd ../playground
+   cd /path/to/agent-ops-dashboard/playground
    npm run dev
    # Dashboard at http://localhost:5173
    ```
 
 ## Basic Usage
 
+All commands work without flags when you have an active session. Config is loaded from `.agentops/config.json`.
+
 ### Session Commands
 
 ```bash
-# Start a session
-agentops start --title "My Session"
+# Start a session (uses config defaults)
+npx agentops start
 
 # Check session status
-agentops status
+npx agentops status
 
 # Log a prompt
-agentops prompt "Help me implement authentication"
+npx agentops prompt "Help me implement authentication"
 
 # Log a response
-agentops response "I'll create an auth module..."
+npx agentops response "I'll create an auth module..."
 
 # Log notes
-agentops note "Authentication complete" --level info
+npx agentops note "Authentication complete"
 
-# Open dashboard to active session
-agentops open
+# Open dashboard to active session (auto-attaches)
+npx agentops open
 
 # Copy dashboard URL to clipboard
-agentops copy
+npx agentops copy
 
 # Stop the session
-agentops stop
+npx agentops stop
 ```
 
 ### Clipboard Commands (Fast Workflow)
 
 ```bash
 # Start a session
-agentops start --title "Fast Session"
+npx agentops start
 
 # Copy text in Claude Code UI, then:
-agentops clip prompt --tool claude-code
+npx agentops clip prompt --tool claude-code
 
 # Copy Claude's response, then:
-agentops clip response --tool claude-code
+npx agentops clip response --tool claude-code
 
 # Copy any notes:
-agentops clip note
+npx agentops clip note
 
 # Open dashboard
-agentops open
+npx agentops open
 
 # Stop when done
-agentops stop
+npx agentops stop
 ```
 
 ### Watch Files
 
 ```bash
-# Watch current directory
-agentops watch
+# Watch current directory (uses config settings)
+npx agentops watch
 
 # Watch with verbose logging
-agentops watch --verbose
+npx agentops watch --verbose
 
 # Watch specific path
-agentops watch --path ./src
+npx agentops watch --path ./src
 
 # Custom ignore patterns
-agentops watch --ignore "node_modules,*.log,tmp"
+npx agentops watch --ignore "node_modules,*.log,tmp"
 ```
 
 ### Execute Commands
 
 ```bash
 # Run tests
-agentops exec -- npm test
+npx agentops exec -- npm test
 
 # Run build
-agentops exec -- npm run build
+npx agentops exec -- npm run build
 
 # Any shell command
-agentops exec -- ls -la
+npx agentops exec -- ls -la
 ```
 
 ## Common Scenarios
@@ -113,35 +129,35 @@ Track your AI coding sessions with Claude Code or any other agent:
 
 ```bash
 # 1. Start a session
-agentops start --title "Implement User Authentication"
+npx agentops start
 
 # 2. Check status
-agentops status
+npx agentops status
 
 # 3. (Optional) Start file watching in parallel
-agentops watch --noComplete &
+npx agentops watch &
 
 # 4. Use Claude Code normally, logging as you work
-agentops prompt "Help me implement JWT authentication"
+npx agentops prompt "Help me implement JWT authentication"
 # ... Claude responds ...
-agentops response "I'll create an auth module with JWT tokens..."
+npx agentops response "I'll create an auth module with JWT tokens..."
 
 # 5. Log notes about your progress
-agentops note "Claude created auth.js with login/logout"
-agentops note "Need to add token refresh logic" --level warn
+npx agentops note "Claude created auth.js with login/logout"
+npx agentops note "Need to add token refresh logic" --level warn
 
 # 6. Run tests
-agentops exec -- npm test
+npx agentops exec -- npm test
 
 # 7. Continue the conversation
-agentops prompt "Add token refresh functionality"
-agentops response "I'll add a refresh token endpoint..."
+npx agentops prompt "Add token refresh functionality"
+npx agentops response "I'll add a refresh token endpoint..."
 
 # 8. Open dashboard to review
-agentops open
+npx agentops open
 
 # 9. Stop the session when done
-agentops stop
+npx agentops stop
 
 # 10. If watch is running, stop it too
 fg  # bring to foreground
@@ -160,30 +176,30 @@ For maximum speed, use clipboard commands to avoid typing:
 
 ```bash
 # 1. Start session
-agentops start --title "Fast Claude Session"
+npx agentops start
 
 # 2. In Claude Code:
 #    - Type your prompt
 #    - Copy it (Cmd+C / Ctrl+C)
-agentops clip prompt --tool claude-code
+npx agentops clip prompt
 
 # 3. Claude responds:
 #    - Copy response (Cmd+C / Ctrl+C)
-agentops clip response --tool claude-code
+npx agentops clip response
 
 # 4. Repeat steps 2-3 as many times as needed
 
 # 5. Add notes by copying text first:
-agentops clip note
+npx agentops clip note
 
 # 6. Open dashboard anytime:
-agentops open
+npx agentops open
 
 # 7. Or copy URL to share:
-agentops copy
+npx agentops copy
 
 # 8. Stop when done:
-agentops stop
+npx agentops stop
 ```
 
 **Benefits:**
@@ -196,18 +212,18 @@ agentops stop
 
 ```bash
 # Log large prompts/responses from files
-agentops prompt - < my-prompt.txt
-agentops response - < response.txt
+npx agentops prompt - < my-prompt.txt
+npx agentops response - < response.txt
 
 # Or from pipes
-cat long-prompt.txt | agentops prompt -
+cat long-prompt.txt | npx agentops prompt -
 ```
 
 **Advanced: Multiple tags**
 
 ```bash
-agentops note "Login component completed" --tag frontend --tag auth --tag completed
-agentops prompt "Review security" --tool claude --model claude-sonnet-4.5 --tag security
+npx agentops note "Login component completed" --tag frontend --tag auth --tag completed
+npx agentops prompt "Review security" --tag security
 ```
 
 ### Development Monitoring
@@ -216,7 +232,7 @@ Watch your project while you work:
 
 ```bash
 cd my-project
-agentops watch --title "My Project Dev" --verbose
+npx agentops watch --verbose
 # Edit files, watch events stream to dashboard
 # Ctrl+C to stop
 ```
@@ -226,51 +242,43 @@ agentops watch --title "My Project Dev" --verbose
 Capture test output:
 
 ```bash
-agentops exec -- npm test
+npx agentops exec -- npm test
 # View results in dashboard
 # Run status automatically marked as error if tests fail
 ```
 
 ### Git Integration
 
-Automatic git diff summaries:
+Automatic git diff summaries (enabled by default):
 
 ```bash
-# Git monitoring enabled by default if in git repo
-agentops watch --diffInterval 10000  # Check every 10 seconds
+# Git monitoring uses config settings
+# Edit .agentops/config.json to adjust diffInterval
+npx agentops watch
 ```
 
-## Advanced Options
+## Configuration
 
-### Custom Server
+Edit `.agentops/config.json` to customize defaults:
 
-```bash
-agentops watch --server https://my-server.com:8787
+```json
+{
+  "server": "http://localhost:8787",
+  "dashboardUrl": "http://localhost:5173",
+  "defaultTitle": "Claude Session",
+  "watch": {
+    "mode": "auto",
+    "ignore": ["node_modules", ".git", "dist"],
+    "diffInterval": 5000
+  },
+  "toolDefaults": {
+    "tool": "claude-code",
+    "model": "sonnet"
+  }
+}
 ```
 
-### API Key Authentication
-
-```bash
-agentops watch --apiKey my-secret-key
-```
-
-### Reuse Existing Run
-
-```bash
-# Create run manually, then use in multiple commands
-RUN_ID="my-run-$(date +%s)"
-agentops watch --runId $RUN_ID &
-agentops exec --runId $RUN_ID -- npm test
-```
-
-### No Auto-Complete
-
-Keep run open after watch stops:
-
-```bash
-agentops watch --noComplete
-# Ctrl+C stops watching but run stays in "running" state
-```
+All commands automatically use these settings. CLI flags override config when needed.
 
 ## Testing
 

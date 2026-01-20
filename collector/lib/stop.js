@@ -13,9 +13,9 @@ async function stopCommand(options) {
   }
 
   const session = sessionManager.loadSession();
-  const server = options.server || session.server;
+  const server = options.server;
   const apiKey = options.apiKey || null;
-  const runId = options.runId || session.runId;
+  const runId = options.runId;
   const status = options.status || 'completed';
   const errorMessage = options.errorMessage || null;
 
