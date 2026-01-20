@@ -255,6 +255,167 @@ agentops response "Code review completed, found 2 issues" --tool claude --model 
 agentops response - < response.txt
 ```
 
+#### `status` - Show Active Session Info
+
+Displays information about the currently active session.
+
+```bash
+agentops status
+```
+
+**Output:**
+
+```
+Active Session:
+  Run ID:     session-1768875516046-bf84b1b1
+  Title:      Claude Code Session
+  Server:     http://localhost:8787
+  Started:    11 minutes ago
+  Repo Root:  /Users/you/project
+
+Quick Commands:
+  agentops open              Open dashboard to this run
+  agentops clip note         Log clipboard as note
+  agentops clip prompt       Log clipboard as LLM prompt
+  agentops clip response     Log clipboard as LLM response
+  agentops stop              Stop this session
+```
+
+**Exit codes:**
+- `0` - Active session exists
+- `1` - No active session found
+
+#### `open` - Open Dashboard
+
+Opens the dashboard in your browser, automatically selecting the active run.
+
+```bash
+agentops open [options]
+```
+
+**Options:**
+
+- `--print` - Print URL instead of opening browser
+- `--runId <id>` - Override run ID (use specific run instead of active session)
+- `--dashboardUrl <url>` - Override dashboard URL (default: `http://localhost:5173`)
+- `--server <url>` - Override server URL
+
+**Examples:**
+
+```bash
+# Open dashboard to active run
+agentops open
+
+# Just print the URL
+agentops open --print
+
+# Open specific run
+agentops open --runId my-run-123
+
+# Use custom dashboard URL
+agentops open --dashboardUrl http://localhost:3000
+```
+
+**Platform support:**
+- macOS: Uses `open` command
+- Linux: Uses `xdg-open` (if available)
+- Windows: Uses `start` command
+- If browser can't be opened automatically, URL is printed instead
+
+#### `copy` - Copy Dashboard URL
+
+Copies the dashboard URL for the active run to your clipboard.
+
+```bash
+agentops copy [options]
+```
+
+**Options:**
+
+- `--runId <id>` - Override run ID
+- `--dashboardUrl <url>` - Override dashboard URL (default: `http://localhost:5173`)
+
+**Examples:**
+
+```bash
+# Copy URL for active run
+agentops copy
+
+# Copy URL for specific run
+agentops copy --runId my-run-123
+```
+
+**Platform support:**
+- macOS: Uses `pbcopy` (built-in)
+- Linux: Uses `xclip` or `wl-copy` (install separately)
+- Windows: Uses PowerShell `Set-Clipboard` (built-in)
+
+#### `clip` - Log from Clipboard
+
+Reads content from your system clipboard and logs it as a note, prompt, or response. This enables a fast workflow: copy text from Claude Code UI, then immediately log it without typing.
+
+```bash
+agentops clip <note|prompt|response> [options]
+```
+
+**For 'note':**
+- `--level <level>` - Log level: `debug`, `info`, `warn`, or `error` (default: `info`)
+- `--tag <tag>` - Add tag (can be used multiple times)
+
+**For 'prompt' and 'response':**
+- `--tool <name>` - Tool name (e.g., `claude-code`)
+- `--model <name>` - Model name (e.g., `sonnet`)
+- `--tag <tag>` - Add tag (can be used multiple times)
+
+**Common options:**
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+- `--runId <id>` - Override run ID
+
+**Examples:**
+
+```bash
+# Copy a note and log it
+# 1. Select and copy text (Cmd+C / Ctrl+C)
+agentops clip note
+
+# Copy a Claude prompt
+# 1. Copy your prompt text from Claude Code UI
+agentops clip prompt --tool claude-code
+
+# Copy a Claude response
+# 1. Copy Claude's response from UI
+agentops clip response --tool claude-code --model sonnet
+
+# Log with tags
+agentops clip note --tag auth --tag backend --level warn
+```
+
+**Output:**
+- Logs are silent by default, showing only character count
+- Example: `Logged prompt from clipboard (142 chars)`
+- This prevents cluttering your terminal with potentially long text
+
+**Platform support:**
+- macOS: Uses `pbpaste` (built-in)
+- Linux: Uses `xclip -o` or `wl-paste` (install separately)
+- Windows: Uses PowerShell `Get-Clipboard` (built-in)
+
+**Installation for Linux:**
+```bash
+# Debian/Ubuntu (X11)
+sudo apt-get install xclip
+
+# Debian/Ubuntu (Wayland)
+sudo apt-get install wl-clipboard
+
+# Fedora/RHEL (X11)
+sudo dnf install xclip
+
+# Fedora/RHEL (Wayland)
+sudo dnf install wl-clipboard
+```
+
 ### Typical Claude Code Workflow
 
 Here's a complete example of using AgentOps with Claude Code:
@@ -263,31 +424,67 @@ Here's a complete example of using AgentOps with Claude Code:
 # 1. Start a session
 agentops start --title "Implement Authentication"
 
-# 2. Optional: Start watching in parallel
+# 2. Check session status
+agentops status
+
+# 3. Optional: Start watching in parallel
 agentops watch --noComplete &
 
-# 3. Use Claude Code normally, logging as you go
+# 4. Use Claude Code normally, logging as you go
 agentops prompt "Help me implement JWT authentication"
 # ... Claude responds ...
 agentops response "I'll create an auth module with JWT tokens..."
 
-# 4. Log notes about progress
+# 5. Log notes about progress
 agentops note "Claude created auth.js with login/logout"
 agentops note "Need to add token refresh logic" --level warn
 
-# 5. Execute tests (optional)
+# 6. Execute tests (optional)
 agentops exec -- npm test
 
-# 6. Continue the conversation
+# 7. Continue the conversation
 agentops prompt "Add token refresh functionality"
 agentops response "I'll add a refresh token endpoint..."
 
-# 7. When done, stop the session
+# 8. When done, stop the session
 agentops stop
 
-# 8. If watch was running, stop it
+# 9. If watch was running, stop it
 fg  # bring watch to foreground
 Ctrl+C  # stop watch
+```
+
+### Fast Claude Code Workflow (Clipboard)
+
+For an even faster workflow, use the clipboard commands to avoid typing:
+
+```bash
+# 1. Start a session
+agentops start --title "Fast Claude Session"
+
+# 2. In Claude Code UI:
+#    - Type your prompt
+#    - Copy it (Cmd+C)
+agentops clip prompt --tool claude-code
+
+# 3. Claude responds
+#    - Copy Claude's response (Cmd+C)
+agentops clip response --tool claude-code
+
+# 4. Repeat steps 2-3 as needed
+
+# 5. Add quick notes by copying and clipping
+#    - Copy any text
+agentops clip note
+
+# 6. Open dashboard to see all events
+agentops open
+
+# 7. Or copy dashboard URL to share
+agentops copy
+
+# 8. Stop when done
+agentops stop
 ```
 
 All events (prompts, responses, notes, file changes, git diffs, test results) are tied to the same run and visible in the dashboard!
@@ -529,22 +726,22 @@ Without API key configured on server, all endpoints are open (development mode).
 
 The collector emits these event types:
 
-| Event Type | Description | Payload |
-|------------|-------------|---------|
-| `run.started` | Watch session started | System info (hostname, user, platform, etc.) |
-| `session.started` | Manual session started | `{ title, repoName, branch, cwd }` |
-| `session.stopped` | Manual session stopped | `{ status }` |
-| `note` | User note logged | `{ text, tags? }` |
-| `llm.prompt` | LLM prompt logged | `{ text, tool?, model?, tags? }` |
-| `llm.response` | LLM response logged | `{ text, tool?, model?, tags? }` |
-| `fs.changed` | Individual file created/modified/deleted | `{ file, kind, timestamp }` |
-| `fs.batch` | Batch of file changes | `{ changes: [{ file, kind }], count, windowMs }` |
-| `watch.warning` | Watch mode warning/fallback | `{ reason, errorCode, modeSwitchedTo }` |
-| `git.diff` | Git status/diff summary | `{ statusPorcelain, diffStat, timestamp }` |
-| `tool.called` | Command execution started | `{ toolCallId, toolName, command, cwd, timestamp }` |
-| `tool.result` | Command execution finished | `{ toolCallId, toolName, exitCode, durationMs, stdout, stderr }` |
-| `run.completed` | Watch/exec session ended | `{ reason, timestamp }` |
-| `run.error` | Command failed | `{ error, command, exitCode, timestamp }` |
+| Event Type | Description | Payload | Commands |
+|------------|-------------|---------|----------|
+| `run.started` | Watch session started | System info (hostname, user, platform, etc.) | `watch` |
+| `session.started` | Manual session started | `{ title, repoName, branch, cwd }` | `start` |
+| `session.stopped` | Manual session stopped | `{ status }` | `stop` |
+| `note` | User note logged | `{ text, tags? }` | `note`, `clip note` |
+| `llm.prompt` | LLM prompt logged | `{ text, tool?, model?, tags? }` | `prompt`, `clip prompt` |
+| `llm.response` | LLM response logged | `{ text, tool?, model?, tags? }` | `response`, `clip response` |
+| `fs.changed` | Individual file created/modified/deleted | `{ file, kind, timestamp }` | `watch` |
+| `fs.batch` | Batch of file changes | `{ changes: [{ file, kind }], count, windowMs }` | `watch` |
+| `watch.warning` | Watch mode warning/fallback | `{ reason, errorCode, modeSwitchedTo }` | `watch` |
+| `git.diff` | Git status/diff summary | `{ statusPorcelain, diffStat, timestamp }` | `watch` |
+| `tool.called` | Command execution started | `{ toolCallId, toolName, command, cwd, timestamp }` | `exec` |
+| `tool.result` | Command execution finished | `{ toolCallId, toolName, exitCode, durationMs, stdout, stderr }` | `exec` |
+| `run.completed` | Watch/exec session ended | `{ reason, timestamp }` | `watch`, `exec`, `stop` |
+| `run.error` | Command failed | `{ error, command, exitCode, timestamp }` | `exec` |
 
 ## Troubleshooting
 

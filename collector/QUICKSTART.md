@@ -32,6 +32,9 @@ npm link  # Optional: make 'agentops' available globally
 # Start a session
 agentops start --title "My Session"
 
+# Check session status
+agentops status
+
 # Log a prompt
 agentops prompt "Help me implement authentication"
 
@@ -41,7 +44,35 @@ agentops response "I'll create an auth module..."
 # Log notes
 agentops note "Authentication complete" --level info
 
+# Open dashboard to active session
+agentops open
+
+# Copy dashboard URL to clipboard
+agentops copy
+
 # Stop the session
+agentops stop
+```
+
+### Clipboard Commands (Fast Workflow)
+
+```bash
+# Start a session
+agentops start --title "Fast Session"
+
+# Copy text in Claude Code UI, then:
+agentops clip prompt --tool claude-code
+
+# Copy Claude's response, then:
+agentops clip response --tool claude-code
+
+# Copy any notes:
+agentops clip note
+
+# Open dashboard
+agentops open
+
+# Stop when done
 agentops stop
 ```
 
@@ -84,29 +115,35 @@ Track your AI coding sessions with Claude Code or any other agent:
 # 1. Start a session
 agentops start --title "Implement User Authentication"
 
-# 2. (Optional) Start file watching in parallel
+# 2. Check status
+agentops status
+
+# 3. (Optional) Start file watching in parallel
 agentops watch --noComplete &
 
-# 3. Use Claude Code normally, logging as you work
+# 4. Use Claude Code normally, logging as you work
 agentops prompt "Help me implement JWT authentication"
 # ... Claude responds ...
 agentops response "I'll create an auth module with JWT tokens..."
 
-# 4. Log notes about your progress
+# 5. Log notes about your progress
 agentops note "Claude created auth.js with login/logout"
 agentops note "Need to add token refresh logic" --level warn
 
-# 5. Run tests
+# 6. Run tests
 agentops exec -- npm test
 
-# 6. Continue the conversation
+# 7. Continue the conversation
 agentops prompt "Add token refresh functionality"
 agentops response "I'll add a refresh token endpoint..."
 
-# 7. Stop the session when done
+# 8. Open dashboard to review
+agentops open
+
+# 9. Stop the session when done
 agentops stop
 
-# 8. If watch is running, stop it too
+# 10. If watch is running, stop it too
 fg  # bring to foreground
 Ctrl+C
 ```
@@ -116,6 +153,44 @@ Ctrl+C
 - File changes and git diffs tracked automatically (if watch is running)
 - Test results and command outputs
 - Complete session history in the dashboard
+
+### Fast Clipboard Workflow
+
+For maximum speed, use clipboard commands to avoid typing:
+
+```bash
+# 1. Start session
+agentops start --title "Fast Claude Session"
+
+# 2. In Claude Code:
+#    - Type your prompt
+#    - Copy it (Cmd+C / Ctrl+C)
+agentops clip prompt --tool claude-code
+
+# 3. Claude responds:
+#    - Copy response (Cmd+C / Ctrl+C)
+agentops clip response --tool claude-code
+
+# 4. Repeat steps 2-3 as many times as needed
+
+# 5. Add notes by copying text first:
+agentops clip note
+
+# 6. Open dashboard anytime:
+agentops open
+
+# 7. Or copy URL to share:
+agentops copy
+
+# 8. Stop when done:
+agentops stop
+```
+
+**Benefits:**
+- No need to type or paste long prompts/responses
+- Just copy and clip - takes 2 seconds
+- All text safely logged without cluttering terminal
+- Perfect for rapid iteration with Claude Code
 
 **Reading from files:**
 

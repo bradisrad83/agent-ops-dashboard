@@ -5,12 +5,18 @@ function parseArgs(args) {
     commandArgs: []
   };
 
+  const validCommands = ['watch', 'exec', 'start', 'stop', 'note', 'prompt', 'response', 'status', 'open', 'clip', 'copy'];
+
+  let commandFound = false;
   let i = 0;
+
   while (i < args.length) {
     const arg = args[i];
 
-    if (arg === 'watch' || arg === 'exec' || arg === 'start' || arg === 'stop' || arg === 'note' || arg === 'prompt' || arg === 'response') {
+    // Only check for command if we haven't found one yet
+    if (!commandFound && validCommands.includes(arg)) {
       result.command = arg;
+      commandFound = true;
       i++;
       continue;
     }
