@@ -16,6 +16,7 @@ const { tailCommand } = require('./lib/tail');
 const { vscodeLogsCommand } = require('./lib/vscode-logs');
 const { vscodeTailCommand } = require('./lib/vscode-tail');
 const { initCommand } = require('./lib/init');
+const { devCommand } = require('./lib/dev');
 const { loadConfig, mergeConfig } = require('./lib/config');
 const { SessionManager } = require('./lib/session');
 
@@ -24,6 +25,7 @@ Agent Ops Collector CLI
 
 Usage:
   agentops init [options]
+  agentops dev [options]
   agentops watch [options]
   agentops exec [options] -- <command> [args...]
   agentops start [options]
@@ -41,6 +43,7 @@ Usage:
 
 Commands:
   init        Initialize AgentOps in a repo (creates config + gitignore)
+  dev         Start/resume session + watch + open dashboard (one command!)
   watch       Watch filesystem for changes and emit events
   exec        Execute a command and capture output
   start       Start a new session
@@ -61,6 +64,23 @@ Session Commands:
     --server <url>       Server URL (default: http://localhost:8787)
     --dashboardUrl <url> Dashboard URL (default: http://localhost:5173)
     --yes                Overwrite existing config file
+
+  dev [options]
+    One command to start/resume session + watch + open dashboard
+    --title <title>      Session title (default: repo name + date)
+    --open               Open dashboard (default: true)
+    --noOpen             Don't open dashboard
+    --watch              Enable watch (default: true)
+    --noWatch            Disable watch
+    --newRun             Force new session (stop existing)
+    --mode <mode>        Watch mode: auto|native|poll (default: auto)
+    --path <path>        Watch path (default: .)
+    --ignore <patterns>  Ignore patterns (comma-separated)
+    --diffInterval <ms>  Git diff interval (default: 5000)
+    --pollInterval <ms>  Poll interval for poll mode (default: 1000)
+    --server <url>       Server URL (default: http://localhost:8787)
+    --dashboardUrl <url> Dashboard URL (default: http://localhost:5173)
+    --apiKey <key>       API key for authentication (optional)
 
   start [options]
     --title <title>      Session title (default: repo name + date)
@@ -179,9 +199,20 @@ Exec Options:
   --verbose              Enable verbose logging
 
 Examples:
+  # Quick Start (Recommended)
   # Initialize in a new repo
   agentops init
 
+  # Start dev mode (creates/resumes session + watch + opens dashboard)
+  agentops dev
+
+  # Work with Claude, log as needed
+  agentops clip prompt
+  agentops clip response
+
+  # Press Ctrl+C to stop
+
+  # Manual workflow
   # Start a session
   agentops start --title "Claude Session"
 
@@ -257,6 +288,11 @@ function main() {
   if (parsed.command === 'init') {
     initCommand(options).catch((err) => {
       console.error('Init command failed:', err.message);
+      process.exit(1);
+    });
+  } else if (parsed.command === 'dev') {
+    devCommand(options).catch((err) => {
+      console.error('Dev command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'watch') {

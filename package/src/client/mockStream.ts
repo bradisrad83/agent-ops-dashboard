@@ -39,7 +39,7 @@ export function createMockEventStream(options: MockStreamOptions): MockStreamCon
     const type = eventTypes[Math.floor(Math.random() * eventTypes.length)]
     const currentRunId = runId ?? `run-${Math.floor(eventCounter / 10)}`
 
-    const payloads: Record<EventType, Record<string, any>> = {
+    const payloads: Partial<Record<EventType, Record<string, any>>> = {
       'run.started': { task: 'Processing request', title: 'Mock Run', cwd: '/workspace', hostname: 'localhost', user: 'dev', platform: 'darwin', pid: 12345 },
       'run.completed': { status: 'success', duration: Math.random() * 1000, reason: 'Completed successfully' },
       'run.error': { error: 'Simulated run error', command: 'npm test', exitCode: 1 },

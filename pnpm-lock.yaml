@@ -8,6 +8,8 @@ importers:
 
   .: {}
 
+  collector: {}
+
   package:
     devDependencies:
       '@types/node':

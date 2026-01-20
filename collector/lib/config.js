@@ -148,6 +148,12 @@ function mergeConfig(cliOptions, config, sessionData) {
   if (cliOptions.noComplete !== undefined) merged.noComplete = cliOptions.noComplete;
   if (cliOptions.verbose) merged.verbose = cliOptions.verbose;
 
+  // Dev command options
+  if (cliOptions.open !== undefined) merged.open = cliOptions.open;
+  if (cliOptions.noOpen !== undefined) merged.noOpen = cliOptions.noOpen;
+  if (cliOptions.noWatch !== undefined) merged.noWatch = cliOptions.noWatch;
+  if (cliOptions.newRun !== undefined) merged.newRun = cliOptions.newRun;
+
   // Tool defaults
   if (cliOptions.tool) merged.toolDefaults.tool = cliOptions.tool;
   if (cliOptions.model) merged.toolDefaults.model = cliOptions.model;
