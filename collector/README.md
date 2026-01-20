@@ -489,6 +489,176 @@ agentops stop
 
 All events (prompts, responses, notes, file changes, git diffs, test results) are tied to the same run and visible in the dashboard!
 
+### Optional: VS Code Log Tailing (Best-Effort)
+
+AgentOps can tail VS Code and Claude Code logs to capture additional context during development. This is a lightweight, best-effort integration that requires no extensions or API access.
+
+**Important:** This feature is experimental and may or may not capture Claude Code activity depending on how logs are emitted. It works on macOS, Linux, and Windows with automatic log detection on macOS.
+
+#### List Available VS Code Logs
+
+```bash
+agentops vscode logs
+```
+
+This will scan typical VS Code log locations and show available log files with their paths, types, sizes, and modification times.
+
+**Example output:**
+```
+Found 5 VS Code log file(s):
+
+1. [extension] extension-output-ms-vscode.extension-1.log
+   Path: ~/Library/Application Support/Code/logs/20260119T123456/extension-output-ms-vscode.extension-1.log
+   Size: 234.5 KB | Modified: 2m ago
+
+2. [exthost] exthost1.log
+   Path: ~/Library/Application Support/Code/logs/20260119T123456/exthost1.log
+   Size: 567.8 KB | Modified: 5m ago
+```
+
+**Options:**
+- `--json` - Output in JSON format
+- `--limit <num>` - Maximum files to show (default: 20)
+
+#### Tail VS Code Logs Automatically
+
+```bash
+agentops vscode tail
+```
+
+Auto-detects and tails the most relevant VS Code log file (prioritizes extension and exthost logs).
+
+**With filtering and redaction:**
+```bash
+agentops vscode tail --redact --filter "Claude|tool|error"
+```
+
+**Options:**
+- `--file <path>` - Tail a specific log file
+- `--pick <index>` - Pick a file from the detected list (1-based index)
+- `--filter <regex>` - Only include lines matching regex
+- `--redact` - Redact sensitive tokens (API keys, Bearer tokens)
+- `--level <level>` - Event level: debug|info|warn|error (default: info)
+- `--tag <tag>` - Add tags (can be used multiple times)
+- `--runId <id>` - Override run ID
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+
+**Examples:**
+```bash
+# Auto-detect and tail with redaction
+agentops vscode tail --redact
+
+# Tail specific log file
+agentops vscode tail --file ~/Library/Application\ Support/Code/logs/.../exthost1.log
+
+# Pick from list
+agentops vscode logs  # See list with indices
+agentops vscode tail --pick 2
+
+# Filter for Claude and errors only
+agentops vscode tail --filter "Claude|error|tool" --redact
+```
+
+#### Generic Log Tailing
+
+You can also tail any log file directly:
+
+```bash
+agentops tail --file /path/to/logfile.log
+```
+
+**Options:**
+- `--file <path>` - Log file path (required)
+- `--follow` - Follow file (default: true)
+- `--fromStart` - Read from start of file (default: false, only new lines)
+- `--interval <ms>` - Poll interval in milliseconds (default: 500)
+- `--maxLine <chars>` - Maximum line length (default: 4000)
+- `--filter <regex>` - Filter lines by regex
+- `--level <level>` - Event level (default: info)
+- `--tag <tag>` - Add tags
+- `--redact` - Redact sensitive patterns
+- `--runId <id>` - Override run ID
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+
+**Examples:**
+```bash
+# Tail from current position
+agentops tail --file /var/log/myapp.log
+
+# Read entire file then follow
+agentops tail --file app.log --fromStart
+
+# With filtering and redaction
+agentops tail --file server.log --filter "ERROR|WARN" --redact
+```
+
+#### Events Emitted
+
+The tail commands emit:
+- `vscode.log` - Normal log lines
+- `vscode.error` - Lines matching error patterns (error, exception, stack)
+- `vscode.detected` - When VS Code logs are detected (optional)
+
+#### How It Works
+
+The tailer uses a polling-based approach with no dependencies:
+- Polls file size every 500ms (configurable)
+- Reads new bytes when file grows
+- Handles file rotation/truncation gracefully
+- Splits into lines and processes each line
+- Truncates long lines to prevent memory issues
+- Applies optional regex filtering
+- Redacts sensitive patterns (API keys, tokens) when enabled
+
+#### Platform-Specific Notes
+
+**macOS:**
+- Automatic detection works out of the box
+- Default log location: `~/Library/Application Support/Code/logs`
+
+**Linux:**
+- Automatic detection supported
+- Default log location: `~/.config/Code/logs`
+
+**Windows:**
+- Automatic detection supported
+- Default log location: `%APPDATA%/Code/logs`
+
+**If auto-detection fails:**
+1. Open VS Code → Help → Toggle Developer Tools
+2. Open Command Palette (Cmd/Ctrl+Shift+P)
+3. Run "Developer: Open Logs Folder"
+4. Use `agentops tail --file <path>` with the log file path
+
+#### Complete Workflow Example
+
+```bash
+# Start a session
+agentops start --title "Claude Code + VS Code Logs"
+
+# Start tailing VS Code logs in background
+agentops vscode tail --redact --filter "Claude|tool" &
+
+# Use Claude Code normally
+# Logs will be captured automatically
+
+# Check what's being logged
+agentops open
+
+# When done, stop the tail (Ctrl+C on the background process)
+# Then stop the session
+agentops stop
+```
+
+#### Limitations
+
+- Best-effort only - may not capture all Claude Code activity
+- Polling-based, so slight delay in event capture
+- Log format and content depend on VS Code/extension versions
+- No official API or extension support
+
 ### `watch` - Watch Filesystem & Git Changes
 
 Monitors the workspace for file changes and emits events to the backend.
@@ -740,6 +910,9 @@ The collector emits these event types:
 | `git.diff` | Git status/diff summary | `{ statusPorcelain, diffStat, timestamp }` | `watch` |
 | `tool.called` | Command execution started | `{ toolCallId, toolName, command, cwd, timestamp }` | `exec` |
 | `tool.result` | Command execution finished | `{ toolCallId, toolName, exitCode, durationMs, stdout, stderr }` | `exec` |
+| `vscode.log` | VS Code log line captured | `{ line, file, tags?, level? }` | `tail`, `vscode tail` |
+| `vscode.error` | VS Code error log line | `{ line, file, tags?, level? }` | `tail`, `vscode tail` |
+| `vscode.detected` | VS Code logs detected | `{ candidates: [{ path, kind }] }` | `vscode logs` |
 | `run.completed` | Watch/exec session ended | `{ reason, timestamp }` | `watch`, `exec`, `stop` |
 | `run.error` | Command failed | `{ error, command, exitCode, timestamp }` | `exec` |
 

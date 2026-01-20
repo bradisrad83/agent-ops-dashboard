@@ -12,6 +12,9 @@ const { statusCommand } = require('./lib/status');
 const { openCommand } = require('./lib/open');
 const { clipCommand } = require('./lib/clip');
 const { copyCommand } = require('./lib/copy');
+const { tailCommand } = require('./lib/tail');
+const { vscodeLogsCommand } = require('./lib/vscode-logs');
+const { vscodeTailCommand } = require('./lib/vscode-tail');
 
 const HELP_TEXT = `
 Agent Ops Collector CLI
@@ -28,6 +31,9 @@ Usage:
   agentops prompt <text> [options]
   agentops response <text> [options]
   agentops clip <note|prompt|response> [options]
+  agentops tail [options]
+  agentops vscode logs [options]
+  agentops vscode tail [options]
 
 Commands:
   watch       Watch filesystem for changes and emit events
@@ -41,6 +47,9 @@ Commands:
   prompt      Log an LLM prompt to the active session
   response    Log an LLM response to the active session
   clip        Log clipboard contents as note/prompt/response
+  tail        Tail a log file and emit events
+  vscode logs List available VS Code log files
+  vscode tail Tail VS Code logs (auto-detect or specify file)
 
 Session Commands:
   start [options]
@@ -111,6 +120,37 @@ Session Commands:
       --apiKey <key>     API key for authentication
       --runId <id>       Override run ID
 
+Tail Options:
+  tail [options]
+    --file <path>        Log file to tail (required)
+    --runId <id>         Override run ID
+    --server <url>       Override server URL
+    --apiKey <key>       API key for authentication
+    --follow             Follow file (default: true)
+    --fromStart          Read from start of file (default: false)
+    --interval <ms>      Poll interval in ms (default: 500)
+    --maxLine <chars>    Max line length (default: 4000)
+    --filter <regex>     Filter lines by regex
+    --level <level>      Event level: debug|info|warn|error (default: info)
+    --tag <tag>          Add tag (can be used multiple times)
+    --redact             Redact sensitive tokens
+
+VS Code Log Options:
+  vscode logs [options]
+    --json               Output JSON format
+    --limit <num>        Max files to show (default: 20)
+
+  vscode tail [options]
+    --file <path>        Specific log file to tail
+    --pick <index>       Pick file from detected list (1-based index)
+    --filter <regex>     Filter lines by regex
+    --redact             Redact sensitive tokens
+    --level <level>      Event level (default: info)
+    --tag <tag>          Add tag (can be used multiple times)
+    --runId <id>         Override run ID
+    --server <url>       Override server URL
+    --apiKey <key>       API key for authentication
+
 Watch Options:
   --server <url>         Server URL (default: http://localhost:8787)
   --title <title>        Run title (default: "Workspace Watch")
@@ -166,6 +206,16 @@ Examples:
 
   # Use API key for authentication
   agentops start --apiKey my-secret-key
+
+  # VS Code logging (optional, best-effort)
+  # List available VS Code log files
+  agentops vscode logs
+
+  # Tail VS Code logs with auto-detection
+  agentops vscode tail --redact --filter "Claude|tool|error"
+
+  # Tail a specific log file
+  agentops tail --file /path/to/log.txt --redact
 `;
 
 function main() {
@@ -233,6 +283,29 @@ function main() {
       console.error('Copy command failed:', err.message);
       process.exit(1);
     });
+  } else if (parsed.command === 'tail') {
+    tailCommand(parsed.options).catch((err) => {
+      console.error('Tail command failed:', err.message);
+      process.exit(1);
+    });
+  } else if (parsed.command === 'vscode') {
+    // Handle vscode subcommands
+    const subcommand = parsed.commandArgs[0];
+    if (subcommand === 'logs') {
+      vscodeLogsCommand(parsed.options).catch((err) => {
+        console.error('VS Code logs command failed:', err.message);
+        process.exit(1);
+      });
+    } else if (subcommand === 'tail') {
+      vscodeTailCommand(parsed.options).catch((err) => {
+        console.error('VS Code tail command failed:', err.message);
+        process.exit(1);
+      });
+    } else {
+      console.error('Unknown vscode subcommand:', subcommand);
+      console.error('Valid subcommands: logs, tail');
+      process.exit(1);
+    }
   } else {
     console.error('Unknown command:', parsed.command);
     console.error('Run "agentops --help" for usage information');

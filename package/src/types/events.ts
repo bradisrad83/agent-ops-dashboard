@@ -21,6 +21,9 @@ export type EventType =
   | "note"
   | "llm.prompt"
   | "llm.response"
+  | "vscode.log"
+  | "vscode.error"
+  | "vscode.detected"
   | "error";
 
 export type EventLevel = "debug" | "info" | "warn" | "error";
