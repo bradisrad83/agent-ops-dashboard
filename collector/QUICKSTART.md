@@ -26,6 +26,25 @@ npm link  # Optional: make 'agentops' available globally
 
 ## Basic Usage
 
+### Session Commands
+
+```bash
+# Start a session
+agentops start --title "My Session"
+
+# Log a prompt
+agentops prompt "Help me implement authentication"
+
+# Log a response
+agentops response "I'll create an auth module..."
+
+# Log notes
+agentops note "Authentication complete" --level info
+
+# Stop the session
+agentops stop
+```
+
 ### Watch Files
 
 ```bash
@@ -56,6 +75,65 @@ agentops exec -- ls -la
 ```
 
 ## Common Scenarios
+
+### Claude Code Workflow (AI Agent Sessions)
+
+Track your AI coding sessions with Claude Code or any other agent:
+
+```bash
+# 1. Start a session
+agentops start --title "Implement User Authentication"
+
+# 2. (Optional) Start file watching in parallel
+agentops watch --noComplete &
+
+# 3. Use Claude Code normally, logging as you work
+agentops prompt "Help me implement JWT authentication"
+# ... Claude responds ...
+agentops response "I'll create an auth module with JWT tokens..."
+
+# 4. Log notes about your progress
+agentops note "Claude created auth.js with login/logout"
+agentops note "Need to add token refresh logic" --level warn
+
+# 5. Run tests
+agentops exec -- npm test
+
+# 6. Continue the conversation
+agentops prompt "Add token refresh functionality"
+agentops response "I'll add a refresh token endpoint..."
+
+# 7. Stop the session when done
+agentops stop
+
+# 8. If watch is running, stop it too
+fg  # bring to foreground
+Ctrl+C
+```
+
+**What you get:**
+- All prompts, responses, notes in one timeline
+- File changes and git diffs tracked automatically (if watch is running)
+- Test results and command outputs
+- Complete session history in the dashboard
+
+**Reading from files:**
+
+```bash
+# Log large prompts/responses from files
+agentops prompt - < my-prompt.txt
+agentops response - < response.txt
+
+# Or from pipes
+cat long-prompt.txt | agentops prompt -
+```
+
+**Advanced: Multiple tags**
+
+```bash
+agentops note "Login component completed" --tag frontend --tag auth --tag completed
+agentops prompt "Review security" --tool claude --model claude-sonnet-4.5 --tag security
+```
 
 ### Development Monitoring
 

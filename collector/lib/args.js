@@ -9,7 +9,7 @@ function parseArgs(args) {
   while (i < args.length) {
     const arg = args[i];
 
-    if (arg === 'watch' || arg === 'exec') {
+    if (arg === 'watch' || arg === 'exec' || arg === 'start' || arg === 'stop' || arg === 'note' || arg === 'prompt' || arg === 'response') {
       result.command = arg;
       i++;
       continue;
@@ -28,7 +28,16 @@ function parseArgs(args) {
         result.options[key] = true;
         i++;
       } else {
-        result.options[key] = nextArg;
+        // Support multiple values for the same flag (e.g., --tag foo --tag bar)
+        if (result.options[key]) {
+          if (Array.isArray(result.options[key])) {
+            result.options[key].push(nextArg);
+          } else {
+            result.options[key] = [result.options[key], nextArg];
+          }
+        } else {
+          result.options[key] = nextArg;
+        }
         i += 2;
       }
     } else {

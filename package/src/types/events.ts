@@ -16,6 +16,11 @@ export type EventType =
   | "fs.batch"
   | "git.diff"
   | "watch.warning"
+  | "session.started"
+  | "session.stopped"
+  | "note"
+  | "llm.prompt"
+  | "llm.response"
   | "error";
 
 export type EventLevel = "debug" | "info" | "warn" | "error";

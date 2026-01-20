@@ -84,6 +84,214 @@ You should now see events appearing live in the dashboard!
 
 ## Commands
 
+### Session Workflow (Claude Code Integration)
+
+The session commands provide a simple workflow for logging LLM interactions with tools like Claude Code, Cursor, or any other AI agent.
+
+#### `start` - Start a Session
+
+Creates a new run and stores it locally in `.agentops/run.json`. All subsequent session commands will use this active run.
+
+```bash
+agentops start [options]
+```
+
+**Options:**
+
+- `--title <title>` - Session title (default: repo name + date)
+- `--server <url>` - Server URL (default: `http://localhost:8787`)
+- `--apiKey <key>` - API key for authentication (optional)
+
+**Examples:**
+
+```bash
+# Start a session with default title
+agentops start
+
+# Start with custom title
+agentops start --title "Claude Code Session - Auth Feature"
+
+# Start with API key
+agentops start --apiKey my-secret-key
+```
+
+**What it does:**
+
+1. Creates a run on the server
+2. Saves session info to `.agentops/run.json` (gitignored automatically)
+3. Posts a `session.started` event
+4. Displays run ID and usage instructions
+
+**Note:** The API key is NOT stored in the session file for security.
+
+#### `stop` - Stop the Active Session
+
+Marks the active session as completed or error and deletes the local session file.
+
+```bash
+agentops stop [options]
+```
+
+**Options:**
+
+- `--status <status>` - Status: `completed` or `error` (default: `completed`)
+- `--errorMessage <msg>` - Error message (only used if status is `error`)
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+- `--runId <id>` - Override run ID (use specific run instead of active session)
+
+**Examples:**
+
+```bash
+# Stop successfully
+agentops stop
+
+# Stop with error
+agentops stop --status error --errorMessage "Authentication implementation failed"
+```
+
+**What it does:**
+
+1. Loads active session from `.agentops/run.json`
+2. Posts completion events (`session.stopped`, `run.completed` or `run.error`)
+3. Updates run status on server
+4. Deletes local session file
+
+#### `note` - Log a Note
+
+Logs arbitrary text notes to the active session.
+
+```bash
+agentops note <text> [options]
+```
+
+**Options:**
+
+- `--level <level>` - Log level: `debug`, `info`, `warn`, or `error` (default: `info`)
+- `--tag <tag>` - Add tag (can be used multiple times)
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+- `--runId <id>` - Override run ID
+
+**Examples:**
+
+```bash
+# Simple note
+agentops note "Starting work on user authentication"
+
+# Note with level
+agentops note "Token validation is slow" --level warn
+
+# Note with tags
+agentops note "Completed login component" --tag frontend --tag auth
+
+# Read from stdin
+agentops note - < my-notes.txt
+
+# Read from pipe
+echo "Test passed" | agentops note -
+```
+
+#### `prompt` - Log an LLM Prompt
+
+Logs a prompt sent to an LLM (e.g., Claude Code).
+
+```bash
+agentops prompt <text> [options]
+```
+
+**Options:**
+
+- `--tool <name>` - Tool name (e.g., `claude`, `codex`, `cursor`)
+- `--model <name>` - Model name (e.g., `claude-sonnet-4.5`)
+- `--tag <tag>` - Add tag (can be used multiple times)
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+- `--runId <id>` - Override run ID
+
+**Examples:**
+
+```bash
+# Simple prompt
+agentops prompt "Implement user login with JWT authentication"
+
+# Prompt with tool and model
+agentops prompt "Review this code for security issues" --tool claude --model claude-sonnet-4.5
+
+# Read from file
+agentops prompt - < my-prompt.txt
+
+# Complex prompt with tags
+agentops prompt "Add unit tests for authentication" --tool claude --tag testing --tag auth
+```
+
+#### `response` - Log an LLM Response
+
+Logs a response received from an LLM.
+
+```bash
+agentops response <text> [options]
+```
+
+**Options:**
+
+- `--tool <name>` - Tool name (e.g., `claude`, `codex`, `cursor`)
+- `--model <name>` - Model name (e.g., `claude-sonnet-4.5`)
+- `--tag <tag>` - Add tag (can be used multiple times)
+- `--server <url>` - Override server URL
+- `--apiKey <key>` - API key for authentication
+- `--runId <id>` - Override run ID
+
+**Examples:**
+
+```bash
+# Simple response
+agentops response "I've implemented JWT authentication with proper token validation"
+
+# Response with tool and model
+agentops response "Code review completed, found 2 issues" --tool claude --model claude-sonnet-4.5
+
+# Read from file
+agentops response - < response.txt
+```
+
+### Typical Claude Code Workflow
+
+Here's a complete example of using AgentOps with Claude Code:
+
+```bash
+# 1. Start a session
+agentops start --title "Implement Authentication"
+
+# 2. Optional: Start watching in parallel
+agentops watch --noComplete &
+
+# 3. Use Claude Code normally, logging as you go
+agentops prompt "Help me implement JWT authentication"
+# ... Claude responds ...
+agentops response "I'll create an auth module with JWT tokens..."
+
+# 4. Log notes about progress
+agentops note "Claude created auth.js with login/logout"
+agentops note "Need to add token refresh logic" --level warn
+
+# 5. Execute tests (optional)
+agentops exec -- npm test
+
+# 6. Continue the conversation
+agentops prompt "Add token refresh functionality"
+agentops response "I'll add a refresh token endpoint..."
+
+# 7. When done, stop the session
+agentops stop
+
+# 8. If watch was running, stop it
+fg  # bring watch to foreground
+Ctrl+C  # stop watch
+```
+
+All events (prompts, responses, notes, file changes, git diffs, test results) are tied to the same run and visible in the dashboard!
+
 ### `watch` - Watch Filesystem & Git Changes
 
 Monitors the workspace for file changes and emits events to the backend.
@@ -324,6 +532,11 @@ The collector emits these event types:
 | Event Type | Description | Payload |
 |------------|-------------|---------|
 | `run.started` | Watch session started | System info (hostname, user, platform, etc.) |
+| `session.started` | Manual session started | `{ title, repoName, branch, cwd }` |
+| `session.stopped` | Manual session stopped | `{ status }` |
+| `note` | User note logged | `{ text, tags? }` |
+| `llm.prompt` | LLM prompt logged | `{ text, tool?, model?, tags? }` |
+| `llm.response` | LLM response logged | `{ text, tool?, model?, tags? }` |
 | `fs.changed` | Individual file created/modified/deleted | `{ file, kind, timestamp }` |
 | `fs.batch` | Batch of file changes | `{ changes: [{ file, kind }], count, windowMs }` |
 | `watch.warning` | Watch mode warning/fallback | `{ reason, errorCode, modeSwitchedTo }` |
