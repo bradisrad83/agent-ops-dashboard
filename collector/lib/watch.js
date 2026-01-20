@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { ApiClient } = require('./client');
 const { FileWatcher } = require('./watcher');
+const { PollingWatcher } = require('./polling-watcher');
 const { GitMonitor } = require('./git');
 
 async function watchCommand(options) {
@@ -18,12 +19,22 @@ async function watchCommand(options) {
   const verbose = options.verbose || false;
   const noComplete = options.noComplete || false;
 
+  // New options for watch modes
+  const mode = options.mode || 'auto'; // 'native', 'poll', or 'auto'
+  const pollInterval = parseInt(options.pollInterval || '1000', 10);
+  const noBatch = options.noBatch || false;
+
   const client = new ApiClient(server, apiKey);
 
   console.log('Agent Ops Collector - Watch Mode');
   console.log('Server:', server);
   console.log('Watch path:', watchPath);
+  console.log('Watch mode:', mode);
   console.log('Ignore patterns:', ignoreList.join(', '));
+  if (mode === 'poll' || mode === 'auto') {
+    console.log('Poll interval:', pollInterval, 'ms');
+  }
+  console.log('Batching:', noBatch ? 'disabled' : 'enabled');
 
   let activeRunId = runId;
 
@@ -112,10 +123,15 @@ async function watchCommand(options) {
     console.error('Failed to post start event:', err.message);
   }
 
-  const watcher = new FileWatcher(watchPath, {
+  // Determine which watcher to use
+  let watcher;
+  let activeMode = mode;
+
+  const watcherOptions = {
     ignore: ignoreList,
     verbose,
     debounceMs: 250,
+    batchMode: !noBatch,
     onEvent: async (event) => {
       try {
         await client.postEvent(activeRunId, {
@@ -124,13 +140,72 @@ async function watchCommand(options) {
           agentId: 'collector'
         });
         if (verbose) {
-          console.log('File change event posted:', event.payload.file, event.payload.kind);
+          if (event.type === 'fs.batch') {
+            console.log('File batch event posted:', event.payload.count, 'changes');
+          } else {
+            console.log('File change event posted:', event.payload.file, event.payload.kind);
+          }
         }
       } catch (err) {
         console.error('Failed to post file change event:', err.message);
       }
     }
-  });
+  };
+
+  if (mode === 'poll') {
+    // Force polling mode
+    console.log('Using polling mode (forced)');
+    watcher = new PollingWatcher(watchPath, {
+      ...watcherOptions,
+      pollInterval
+    });
+    activeMode = 'poll';
+  } else if (mode === 'native') {
+    // Force native mode
+    console.log('Using native fs.watch mode (forced)');
+    watcher = new FileWatcher(watchPath, watcherOptions);
+    activeMode = 'native';
+  } else {
+    // Auto mode: try native, fallback to poll on error
+    console.log('Using auto mode (will try native, fallback to poll if needed)');
+    watcher = new FileWatcher(watchPath, {
+      ...watcherOptions,
+      onError: async (error) => {
+        console.warn('Native watcher failed:', error.message);
+        console.log('Switching to polling mode...');
+
+        // Post warning event
+        try {
+          await client.postEvent(activeRunId, {
+            type: 'watch.warning',
+            level: 'warning',
+            agentId: 'collector',
+            payload: {
+              reason: error.reason || 'Native watcher failed',
+              errorCode: error.code,
+              errorMessage: error.message,
+              modeSwitchedTo: 'poll',
+              timestamp: new Date().toISOString()
+            }
+          });
+        } catch (err) {
+          console.error('Failed to post warning event:', err.message);
+        }
+
+        // Stop native watcher
+        watcher.stop();
+
+        // Switch to polling
+        watcher = new PollingWatcher(watchPath, {
+          ...watcherOptions,
+          pollInterval
+        });
+        activeMode = 'poll';
+        watcher.start();
+      }
+    });
+    activeMode = 'native';
+  }
 
   watcher.start();
   gitMonitor.start();

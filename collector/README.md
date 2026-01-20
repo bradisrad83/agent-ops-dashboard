@@ -5,9 +5,11 @@ CLI tool to collect file changes, git diffs, and command execution events for th
 ## Features
 
 - **Filesystem watching**: Recursively monitors directories for file changes (create/modify/delete)
+  - **Multiple watch modes**: Native fs.watch, polling, or auto-fallback for maximum reliability
+  - **Event batching**: Intelligent batching to reduce noise from rapid changes
 - **Git diff tracking**: Periodic git status and diff summaries
-- **Command execution**: Capture command output and exit codes
-- **Debounced events**: Batches rapid file changes to reduce noise
+- **Command execution**: Capture command output and exit codes with correlation IDs
+- **Cross-platform reliability**: Works on macOS, Linux, and Windows with graceful fallbacks
 - **Zero runtime dependencies**: Uses only Node.js built-ins
 
 ## Installation
@@ -96,6 +98,9 @@ agentops watch [options]
 - `--title <title>` - Run title (default: `"Workspace Watch"`)
 - `--path <path>` - Path to watch (default: `.`)
 - `--ignore <patterns>` - Comma-separated ignore patterns (default: `node_modules,.git,dist,build,coverage`)
+- `--mode <mode>` - Watch mode: `native`, `poll`, or `auto` (default: `auto`)
+- `--pollInterval <ms>` - Polling interval in milliseconds when using poll mode (default: `1000`)
+- `--noBatch` - Disable event batching, emit individual fs.changed events (default: batching enabled)
 - `--diffInterval <ms>` - Git diff check interval in milliseconds (default: `5000`)
 - `--apiKey <key>` - API key for authentication (optional)
 - `--runId <id>` - Use existing run ID instead of creating new one (optional)
@@ -105,11 +110,23 @@ agentops watch [options]
 **Examples:**
 
 ```bash
-# Watch current directory with defaults
+# Watch current directory with defaults (auto mode)
 agentops watch
 
 # Watch specific path
 agentops watch --path ./src
+
+# Force polling mode (useful on Linux with large directories)
+agentops watch --mode poll
+
+# Force native fs.watch mode
+agentops watch --mode native
+
+# Poll every 2 seconds instead of default 1 second
+agentops watch --mode poll --pollInterval 2000
+
+# Disable event batching (get individual fs.changed events)
+agentops watch --noBatch
 
 # Custom ignore patterns
 agentops watch --ignore "node_modules,*.log,tmp,cache"
@@ -127,8 +144,10 @@ agentops watch --verbose
 **Events Emitted:**
 
 - `run.started` - When watch begins (includes system info)
-- `fs.changed` - File created/modified/deleted
+- `fs.changed` - Individual file created/modified/deleted (when --noBatch is used or single file changes)
+- `fs.batch` - Batched file changes (default behavior, multiple changes in one event)
 - `git.diff` - Periodic git status and diff summaries
+- `watch.warning` - Watch mode warnings (e.g., fallback from native to poll mode)
 - `run.completed` - When watch stops (Ctrl+C)
 
 **Stop Watching:**
@@ -177,8 +196,8 @@ agentops exec -- bash -c "echo hello && ls -la"
 
 **Events Emitted:**
 
-- `tool.called` - Before command execution (includes command and cwd)
-- `tool.result` - After execution (includes exit code, duration, stdout/stderr snippets)
+- `tool.called` - Before command execution (includes command, cwd, and toolCallId for correlation)
+- `tool.result` - After execution (includes exit code, duration, stdout/stderr snippets, and matching toolCallId)
 - `run.error` - If command fails (exit code != 0)
 
 **Output Capture:**
@@ -197,7 +216,9 @@ collector/
 ├── lib/
 │   ├── args.js          # Argument parsing
 │   ├── client.js        # HTTP client for API calls
-│   ├── watcher.js       # Filesystem watching
+│   ├── watcher.js       # Native filesystem watching (fs.watch)
+│   ├── polling-watcher.js # Polling-based filesystem watching
+│   ├── change-batcher.js  # Batching layer for fs events
 │   ├── git.js           # Git diff monitoring
 │   ├── watch.js         # Watch command implementation
 │   └── exec.js          # Exec command implementation
@@ -212,20 +233,28 @@ collector/
    - Implements `createRun()`, `patchRun()`, `postEvent()` methods
    - Adds `x-api-key` header when API key provided
 
-2. **File Watcher** (`lib/watcher.js`):
-   - Uses `fs.watch()` with recursive directory scanning
-   - Debounces changes (250ms) to batch rapid updates
+2. **File Watcher** (`lib/watcher.js` + `lib/polling-watcher.js`):
+   - **Native mode**: Uses `fs.watch()` with recursive directory scanning
+   - **Polling mode**: Periodic stat-based scanning (fallback for large repos)
+   - **Auto mode**: Tries native, falls back to polling on error
+   - Batches changes (250ms window) to reduce noise
    - Respects ignore patterns
    - Detects create/modify/delete operations
 
-3. **Git Monitor** (`lib/git.js`):
+3. **Change Batcher** (`lib/change-batcher.js`):
+   - Shared batching layer used by both watchers
+   - Configurable batch window (default 250ms)
+   - Can emit `fs.batch` events or individual `fs.changed` events
+   - Deduplicates multiple changes to same file within window
+
+4. **Git Monitor** (`lib/git.js`):
    - Checks if git is available via `git --version`
    - Runs `git status --porcelain` and `git diff --stat`
    - Emits events at configurable intervals
    - Truncates large outputs to 10KB
    - Gracefully disables if git not available
 
-4. **Event Flow**:
+5. **Event Flow**:
    ```
    File Change → Watcher → Debounce → Event → HTTP Client → API → SQLite → SSE → Dashboard
    ```
@@ -295,10 +324,12 @@ The collector emits these event types:
 | Event Type | Description | Payload |
 |------------|-------------|---------|
 | `run.started` | Watch session started | System info (hostname, user, platform, etc.) |
-| `fs.changed` | File created/modified/deleted | `{ file, kind, timestamp }` |
+| `fs.changed` | Individual file created/modified/deleted | `{ file, kind, timestamp }` |
+| `fs.batch` | Batch of file changes | `{ changes: [{ file, kind }], count, windowMs }` |
+| `watch.warning` | Watch mode warning/fallback | `{ reason, errorCode, modeSwitchedTo }` |
 | `git.diff` | Git status/diff summary | `{ statusPorcelain, diffStat, timestamp }` |
-| `tool.called` | Command execution started | `{ toolName, command, cwd, timestamp }` |
-| `tool.result` | Command execution finished | `{ toolName, exitCode, durationMs, stdout, stderr }` |
+| `tool.called` | Command execution started | `{ toolCallId, toolName, command, cwd, timestamp }` |
+| `tool.result` | Command execution finished | `{ toolCallId, toolName, exitCode, durationMs, stdout, stderr }` |
 | `run.completed` | Watch/exec session ended | `{ reason, timestamp }` |
 | `run.error` | Command failed | `{ error, command, exitCode, timestamp }` |
 
@@ -347,8 +378,52 @@ The collector emits these event types:
 
 **Solutions:**
 - Add more ignore patterns: `--ignore "node_modules,.git,dist,*.log,tmp"`
-- Increase debounce in code (edit `lib/watcher.js` `debounceMs`)
+- Batching is enabled by default (should help)
 - Watch a smaller path: `--path ./src`
+
+### Watch Mode Issues
+
+**Error:** `ENOSPC: System limit for number of file watchers reached`
+
+**Solutions:**
+- This is a Linux inotify limit issue
+- Option 1: Increase the limit (see "Watch Modes Explained" section)
+- Option 2: Use polling mode: `--mode poll`
+- Option 3: Use auto mode (default) - will fallback automatically
+
+**Issue:** Changes not detected immediately
+
+**Possible causes:**
+- Using polling mode with long poll interval
+- Network file system (NFS, CIFS) doesn't support native watching
+
+**Solutions:**
+- Check current mode in startup logs
+- Reduce poll interval: `--pollInterval 500`
+- Force native mode if appropriate: `--mode native`
+
+**Issue:** High CPU usage
+
+**Possible causes:**
+- Polling mode on very large repository
+- Poll interval too aggressive
+
+**Solutions:**
+- Increase poll interval: `--pollInterval 2000`
+- Add more ignore patterns
+- Try native mode if OS supports it: `--mode native`
+
+**Warning:** `Switched to polling mode`
+
+**Meaning:**
+- Auto mode detected a native watcher failure
+- Automatically switched to polling as fallback
+- This is expected behavior on large repos or when hitting OS limits
+
+**Actions:**
+- No action needed - watch will continue working
+- If you prefer native mode, increase system limits
+- If you prefer polling from start, use `--mode poll`
 
 ### Events Not Appearing Live
 
@@ -439,12 +514,125 @@ agentops exec -- npm run build
 
 Each command creates events in separate runs unless `--runId` is shared.
 
+## Watch Modes Explained
+
+The collector supports three watch modes to ensure reliability across different operating systems and repository sizes:
+
+### `--mode auto` (Default, Recommended)
+
+Starts with native `fs.watch()` and automatically falls back to polling if resource limits are hit.
+
+**When it falls back:**
+- Linux: When inotify watch limit is exceeded (ENOSPC error)
+- Any OS: Too many open file handles (EMFILE/ENFILE errors)
+
+**What happens:**
+1. Tries native fs.watch()
+2. If error occurs, emits a `watch.warning` event
+3. Switches to polling mode automatically
+4. Continues monitoring without interruption
+
+**Best for:** Most use cases - gets native performance when possible, reliability when needed.
+
+### `--mode native` (Force Native)
+
+Uses only `fs.watch()` with recursive directory scanning.
+
+**Pros:**
+- Very efficient on macOS (uses FSEvents)
+- Low CPU usage
+- Instant change detection
+
+**Cons:**
+- Linux: May hit inotify limits on large repositories (common issue)
+- Requires one file descriptor per directory watched
+- Will fail if resource limits exceeded
+
+**Platform behavior:**
+- **macOS**: Native FSEvents (excellent, recommended)
+- **Linux**: inotify (good for small-medium repos, may hit limits on large monorepos)
+- **Windows**: ReadDirectoryChangesW (can be slow on large directories)
+
+**Best for:** Small-medium projects on macOS, or when you've increased system limits on Linux.
+
+**How to increase Linux inotify limits:**
+```bash
+# Temporary (until reboot)
+sudo sysctl fs.inotify.max_user_watches=524288
+
+# Permanent
+echo "fs.inotify.max_user_watches=524288" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p
+```
+
+### `--mode poll` (Force Polling)
+
+Uses periodic directory scanning with file stat comparisons instead of native events.
+
+**How it works:**
+1. Scans all files in the workspace (respecting ignore patterns)
+2. Stores a snapshot (mtime + size for each file)
+3. Re-scans every `--pollInterval` milliseconds (default 1000ms)
+4. Compares snapshots to detect created/modified/deleted files
+
+**Pros:**
+- Works everywhere, no OS limits
+- Reliable on network file systems
+- No file descriptor limits
+- Safe for very large repositories (has 50k file safety limit)
+
+**Cons:**
+- Higher CPU usage (proportional to file count and poll frequency)
+- Change detection latency = poll interval
+- More I/O intensive
+
+**Best for:**
+- Large monorepos on Linux
+- Network/shared file systems
+- Docker containers with limited resources
+- When native watching is unreliable
+
+**Tuning poll interval:**
+```bash
+# Faster polling (more CPU, quicker detection)
+agentops watch --mode poll --pollInterval 500
+
+# Slower polling (less CPU, slower detection)
+agentops watch --mode poll --pollInterval 5000
+```
+
+### Event Batching
+
+Both native and polling modes support event batching to reduce noise:
+
+**Batching enabled (default):**
+- Collects changes over a 250ms window
+- Emits single `fs.batch` event with all changes
+- Reduces API calls and dashboard noise
+
+**Batching disabled (`--noBatch`):**
+- Emits individual `fs.changed` event for each file
+- Useful for debugging or when you need per-file granularity
+
+**Example batch event:**
+```json
+{
+  "type": "fs.batch",
+  "payload": {
+    "changes": [
+      { "file": "src/index.js", "kind": "modified" },
+      { "file": "src/utils.js", "kind": "modified" },
+      { "file": "test/new.test.js", "kind": "created" }
+    ],
+    "count": 3,
+    "windowMs": 250
+  }
+}
+```
+
 ## Limitations
 
-- **Filesystem watching**: Uses `fs.watch()`, which has platform-specific behavior
-  - macOS: Native FSEvents (very efficient)
-  - Linux: inotify (efficient but may hit limits on large directories)
-  - Windows: ReadDirectoryChangesW (can be slow on large directories)
+- **Polling mode**: Performance scales with file count and poll frequency (recommend <10k files or adjust poll interval)
 
 - **Git operations**: Spawns git processes, so performance depends on repo size
 

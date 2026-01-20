@@ -430,7 +430,7 @@ interface GitActivity {
   filesChanged: number
 }
 
-// Compute file activity from fs.changed events
+// Compute file activity from fs.changed and fs.batch events
 const fileActivity = computed(() => {
   const created: FileActivity[] = []
   const modified: FileActivity[] = []
@@ -439,6 +439,7 @@ const fileActivity = computed(() => {
   const fileMap = new Map<string, FileActivity>()
 
   events.value.forEach(event => {
+    // Handle individual fs.changed events
     if (event.type === 'fs.changed' && event.payload) {
       const file = event.payload.file
       const kind = event.payload.kind as 'created' | 'modified' | 'deleted'
@@ -458,6 +459,33 @@ const fileActivity = computed(() => {
           count: 1,
           lastKind: kind
         })
+      }
+    }
+
+    // Handle batched fs.batch events
+    if (event.type === 'fs.batch' && event.payload && event.payload.changes) {
+      const changes = event.payload.changes as Array<{ file: string; kind: 'created' | 'modified' | 'deleted' }>
+      const ts = event.ts
+
+      for (const change of changes) {
+        const file = change.file
+        const kind = change.kind
+
+        if (!file || !kind) continue
+
+        const existing = fileMap.get(file)
+        if (existing) {
+          existing.count++
+          existing.lastTs = ts
+          existing.lastKind = kind
+        } else {
+          fileMap.set(file, {
+            path: file,
+            lastTs: ts,
+            count: 1,
+            lastKind: kind
+          })
+        }
       }
     }
   })
@@ -485,11 +513,20 @@ const commandActivity = computed(() => {
   const commands: CommandActivity[] = []
   const callMap = new Map<string, CommandActivity>()
 
+  // Build index of tool.result events by toolCallId for fast lookup
+  const resultsByToolCallId = new Map<string, any>()
+  events.value.forEach(event => {
+    if (event.type === 'tool.result' && event.payload && event.payload.toolCallId) {
+      resultsByToolCallId.set(event.payload.toolCallId, event.payload)
+    }
+  })
+
   events.value.forEach((event, index) => {
     if (event.type === 'tool.called' && event.payload) {
       const command = event.payload.command
       const cwd = event.payload.cwd
       const timestamp = event.payload.timestamp || event.ts
+      const toolCallId = event.payload.toolCallId
 
       if (!command) return
 
@@ -503,16 +540,26 @@ const commandActivity = computed(() => {
 
       callMap.set(event.id, entry)
 
-      // Look ahead for matching tool.result (within next 100 events)
-      const lookAheadLimit = Math.min(index + 100, events.value.length)
-      for (let i = index + 1; i < lookAheadLimit; i++) {
-        const nextEvent = events.value[i]
-        if (nextEvent && nextEvent.type === 'tool.result' && nextEvent.payload) {
-          // Assume it's the result for this call (no correlation ID, so pair by proximity)
-          entry.exitCode = nextEvent.payload.exitCode
-          entry.durationMs = nextEvent.payload.durationMs
-          entry.status = nextEvent.payload.exitCode === 0 ? 'success' : 'error'
-          break
+      // Prefer pairing by toolCallId if available
+      if (toolCallId && resultsByToolCallId.has(toolCallId)) {
+        const result = resultsByToolCallId.get(toolCallId)
+        if (result) {
+          entry.exitCode = result.exitCode
+          entry.durationMs = result.durationMs
+          entry.status = result.exitCode === 0 ? 'success' : 'error'
+        }
+      } else {
+        // Fallback: Look ahead for matching tool.result (within next 100 events)
+        const lookAheadLimit = Math.min(index + 100, events.value.length)
+        for (let i = index + 1; i < lookAheadLimit; i++) {
+          const nextEvent = events.value[i]
+          if (nextEvent && nextEvent.type === 'tool.result' && nextEvent.payload) {
+            // Pair by proximity (legacy behavior)
+            entry.exitCode = nextEvent.payload.exitCode
+            entry.durationMs = nextEvent.payload.durationMs
+            entry.status = nextEvent.payload.exitCode === 0 ? 'success' : 'error'
+            break
+          }
         }
       }
 

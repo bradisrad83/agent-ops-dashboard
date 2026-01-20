@@ -13,7 +13,9 @@ export type EventType =
   | "tool.result"
   | "artifact.produced"
   | "fs.changed"
+  | "fs.batch"
   | "git.diff"
+  | "watch.warning"
   | "error";
 
 export type EventLevel = "debug" | "info" | "warn" | "error";

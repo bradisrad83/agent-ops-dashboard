@@ -60,12 +60,16 @@ async function execCommand(commandArgs, options) {
   const startTime = Date.now();
   const cwd = process.cwd();
 
+  // Generate toolCallId for correlation
+  const toolCallId = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+
   try {
     await client.postEvent(activeRunId, {
       type: 'tool.called',
       level: 'info',
       agentId: 'collector',
       payload: {
+        toolCallId,
         toolName: 'exec',
         command: commandArgs.join(' '),
         cwd,
@@ -73,7 +77,7 @@ async function execCommand(commandArgs, options) {
       }
     });
     if (verbose) {
-      console.log('Command exec event posted');
+      console.log('Command exec event posted with toolCallId:', toolCallId);
     }
   } catch (err) {
     console.error('Failed to post exec event:', err.message);
@@ -126,6 +130,7 @@ async function execCommand(commandArgs, options) {
         level: exitCode === 0 ? 'info' : 'error',
         agentId: 'collector',
         payload: {
+          toolCallId,
           toolName: 'exec',
           exitCode,
           durationMs,
@@ -135,7 +140,7 @@ async function execCommand(commandArgs, options) {
         }
       });
       if (verbose) {
-        console.log('Command result event posted');
+        console.log('Command result event posted with toolCallId:', toolCallId);
       }
     } catch (err) {
       console.error('Failed to post result event:', err.message);

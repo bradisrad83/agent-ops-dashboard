@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { ChangeBatcher } = require('./change-batcher');
 
 class FileWatcher {
   constructor(rootPath, options = {}) {
@@ -7,11 +8,22 @@ class FileWatcher {
     this.ignorePatterns = options.ignore || [];
     this.debounceMs = options.debounceMs || 250;
     this.onEvent = options.onEvent || (() => {});
+    this.onError = options.onError || (() => {});
     this.verbose = options.verbose || false;
+    this.batchMode = options.batchMode !== false; // default true
 
     this.watchers = new Map();
-    this.pendingChanges = new Map();
-    this.debounceTimer = null;
+    this.failed = false;
+
+    // Use ChangeBatcher for debouncing and batching
+    this.batcher = new ChangeBatcher({
+      batchMode: this.batchMode,
+      windowMs: this.debounceMs,
+      verbose: this.verbose,
+      onFlush: (event) => {
+        this.onEvent(event);
+      }
+    });
   }
 
   shouldIgnore(filePath) {
@@ -41,38 +53,15 @@ class FileWatcher {
       return;
     }
 
-    this.pendingChanges.set(filePath, { file: filePath, kind });
-
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-    }
-
-    this.debounceTimer = setTimeout(() => {
-      this.flushChanges();
-    }, this.debounceMs);
-  }
-
-  flushChanges() {
-    if (this.pendingChanges.size === 0) {
-      return;
-    }
-
-    const changes = Array.from(this.pendingChanges.values());
-    this.pendingChanges.clear();
-
-    for (const change of changes) {
-      this.onEvent({
-        type: 'fs.changed',
-        payload: {
-          file: path.relative(this.rootPath, change.file),
-          kind: change.kind,
-          timestamp: new Date().toISOString(),
-        },
-      });
-    }
+    const relativePath = path.relative(this.rootPath, filePath);
+    this.batcher.queue(relativePath, kind);
   }
 
   watchDirectory(dirPath) {
+    if (this.failed) {
+      return; // Stop trying if we've already failed
+    }
+
     if (this.shouldIgnore(dirPath)) {
       return;
     }
@@ -102,6 +91,12 @@ class FileWatcher {
         });
       });
 
+      // Handle watcher errors (ENOSPC, etc.)
+      watcher.on('error', (err) => {
+        this.log('Watcher error:', err.message);
+        this.handleWatchError(err);
+      });
+
       this.watchers.set(dirPath, watcher);
       this.log('Watching:', dirPath);
 
@@ -117,6 +112,25 @@ class FileWatcher {
       });
     } catch (err) {
       this.log('Error watching directory:', dirPath, err.message);
+      this.handleWatchError(err);
+    }
+  }
+
+  handleWatchError(err) {
+    // Check for common resource limit errors
+    const isResourceError =
+      err.code === 'ENOSPC' ||  // No space (inotify limit on Linux)
+      err.code === 'EMFILE' ||  // Too many open files
+      err.code === 'ENFILE' ||  // File table overflow
+      err.message.includes('watch') && err.message.includes('ENOSPC');
+
+    if (isResourceError && !this.failed) {
+      this.failed = true;
+      this.onError({
+        code: err.code || 'WATCH_ERROR',
+        message: err.message,
+        reason: 'Resource limits exceeded - too many files to watch'
+      });
     }
   }
 
@@ -128,10 +142,7 @@ class FileWatcher {
   stop() {
     this.log('Stopping file watcher');
 
-    if (this.debounceTimer) {
-      clearTimeout(this.debounceTimer);
-      this.flushChanges();
-    }
+    this.batcher.stop();
 
     for (const watcher of this.watchers.values()) {
       watcher.close();
