@@ -5,7 +5,7 @@ function parseArgs(args) {
     commandArgs: []
   };
 
-  const validCommands = ['init', 'dev', 'watch', 'exec', 'start', 'stop', 'note', 'prompt', 'response', 'status', 'open', 'clip', 'copy', 'tail', 'vscode'];
+  const validCommands = ['init', 'dev', 'watch', 'exec', 'run', 'start', 'stop', 'note', 'prompt', 'response', 'status', 'open', 'clip', 'copy', 'tail', 'vscode'];
 
   let commandFound = false;
   let i = 0;

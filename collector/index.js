@@ -3,6 +3,7 @@
 const { parseArgs } = require('./lib/args');
 const { watchCommand } = require('./lib/watch');
 const { execCommand } = require('./lib/exec');
+const { runCommand } = require('./lib/run');
 const { startCommand } = require('./lib/start');
 const { stopCommand } = require('./lib/stop');
 const { noteCommand } = require('./lib/note');
@@ -28,6 +29,7 @@ Usage:
   agentops dev [options]
   agentops watch [options]
   agentops exec [options] -- <command> [args...]
+  agentops run [options] -- <command> [args...]
   agentops start [options]
   agentops stop [options]
   agentops status
@@ -46,6 +48,7 @@ Commands:
   dev         Start/resume session + watch + open dashboard (one command!)
   watch       Watch filesystem for changes and emit events
   exec        Execute a command and capture output
+  run         Wrap a CLI agent and stream stdout/stderr to active run
   start       Start a new session
   stop        Stop the active session
   status      Show active session info
@@ -198,6 +201,22 @@ Exec Options:
   --runId <id>           Use existing run ID (optional)
   --verbose              Enable verbose logging
 
+Run Options:
+  --title <title>        Session title (default: "<agent> run - <repoName>")
+  --newRun               Force new session (stop existing)
+  --noOpen               Don't open dashboard
+  --agent <name>         Agent name: claude|codex|cursor|unknown (default: unknown)
+  --cwd <path>           Working directory for command
+  --env KEY=VALUE        Environment variable (repeatable)
+  --redact               Redact sensitive tokens from output
+  --maxLine <chars>      Max line length (default: 2000)
+  --flushMs <ms>         Flush interval in ms (default: 500)
+  --maxBatchLines <num>  Max lines per batch (default: 50)
+  --maxBatchChars <num>  Max chars per batch (default: 20000)
+  --server <url>         Server URL (default: http://localhost:8787)
+  --dashboardUrl <url>   Dashboard URL (default: http://localhost:5173)
+  --apiKey <key>         API key for authentication (optional)
+
 Examples:
   # Quick Start (Recommended)
   # Initialize in a new repo
@@ -247,6 +266,11 @@ Examples:
 
   # Execute a command
   agentops exec -- npm test
+
+  # Wrap a CLI agent and capture output
+  agentops run --agent claude -- claude
+  agentops run --newRun --title "Refactor auth" --agent claude -- claude --dangerously-skip-permissions
+  agentops run --agent codex --redact -- codex "refactor auth module"
 
   # Use API key for authentication
   agentops start --apiKey my-secret-key
@@ -303,6 +327,11 @@ function main() {
   } else if (parsed.command === 'exec') {
     execCommand(parsed.commandArgs, options).catch((err) => {
       console.error('Exec command failed:', err.message);
+      process.exit(1);
+    });
+  } else if (parsed.command === 'run') {
+    runCommand(parsed.commandArgs, options).catch((err) => {
+      console.error('Run command failed:', err.message);
       process.exit(1);
     });
   } else if (parsed.command === 'start') {

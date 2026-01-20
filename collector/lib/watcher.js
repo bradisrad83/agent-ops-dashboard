@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ChangeBatcher } = require('./change-batcher');
+const { SummaryBatcher } = require('./summary-batcher');
 
 class FileWatcher {
   constructor(rootPath, options = {}) {
@@ -11,19 +12,31 @@ class FileWatcher {
     this.onError = options.onError || (() => {});
     this.verbose = options.verbose || false;
     this.batchMode = options.batchMode !== false; // default true
+    this.fsMode = options.fsMode || 'batch'; // 'raw', 'batch', 'summary', 'off'
 
     this.watchers = new Map();
     this.failed = false;
 
-    // Use ChangeBatcher for debouncing and batching
-    this.batcher = new ChangeBatcher({
-      batchMode: this.batchMode,
-      windowMs: this.debounceMs,
-      verbose: this.verbose,
-      onFlush: (event) => {
-        this.onEvent(event);
-      }
-    });
+    // Use SummaryBatcher for summary mode, ChangeBatcher for others
+    if (this.fsMode === 'summary') {
+      this.batcher = new SummaryBatcher({
+        windowMs: 5000, // 5 seconds for summary mode
+        verbose: this.verbose,
+        onFlush: (event) => {
+          this.onEvent(event);
+        }
+      });
+    } else {
+      this.batcher = new ChangeBatcher({
+        batchMode: this.batchMode,
+        fsMode: this.fsMode,
+        windowMs: this.debounceMs,
+        verbose: this.verbose,
+        onFlush: (event) => {
+          this.onEvent(event);
+        }
+      });
+    }
   }
 
   shouldIgnore(filePath) {

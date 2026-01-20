@@ -121,12 +121,53 @@ npx agentops exec -- npm run build
 npx agentops exec -- ls -la
 ```
 
+### Wrap CLI Agents
+
+```bash
+# Wrap Claude Code CLI and stream output to dashboard
+npx agentops run --agent claude -- claude
+
+# New session with custom title
+npx agentops run --newRun --title "Refactor auth" --agent claude -- claude
+
+# Wrap any agent with redaction
+npx agentops run --agent codex --redact -- codex "implement feature"
+```
+
 ## Common Scenarios
 
 ### Claude Code Workflow (AI Agent Sessions)
 
 Track your AI coding sessions with Claude Code or any other agent:
 
+**With calm mode (recommended - reduces noise):**
+```bash
+# 1. Start session with agent profile
+npx agentops dev --profile agent
+
+# 2. Use Claude Code normally - file changes are automatically summarized
+npx agentops prompt "Help me implement JWT authentication"
+# ... Claude responds ...
+npx agentops response "I'll create an auth module with JWT tokens..."
+
+# 3. Log notes about your progress
+npx agentops note "Claude created auth.js with login/logout"
+npx agentops note "Need to add token refresh logic" --level warn
+
+# 4. Run tests
+npx agentops exec -- npm test
+
+# 5. Continue the conversation
+npx agentops prompt "Add token refresh functionality"
+npx agentops response "I'll add a refresh token endpoint..."
+
+# 6. Open dashboard to review
+npx agentops open
+
+# 7. Stop the session when done (Ctrl+C)
+```
+
+**With full mode (maximum fidelity):**
 ```bash
 # 1. Start a session
 npx agentops start
@@ -166,7 +207,8 @@ Ctrl+C
 
 **What you get:**
 - All prompts, responses, notes in one timeline
-- File changes and git diffs tracked automatically (if watch is running)
+- File changes tracked automatically (summarized in agent mode, detailed in full mode)
+- Git diffs available if enabled
 - Test results and command outputs
 - Complete session history in the dashboard
 
@@ -261,11 +303,13 @@ npx agentops watch
 
 Edit `.agentops/config.json` to customize defaults:
 
+**Full fidelity mode (default):**
 ```json
 {
   "server": "http://localhost:8787",
   "dashboardUrl": "http://localhost:5173",
   "defaultTitle": "Claude Session",
+  "profile": "full",
   "watch": {
     "mode": "auto",
     "ignore": ["node_modules", ".git", "dist"],
@@ -276,6 +320,42 @@ Edit `.agentops/config.json` to customize defaults:
     "model": "sonnet"
   }
 }
+```
+
+**Agent-focused calm mode (recommended for AI agents):**
+```json
+{
+  "server": "http://localhost:8787",
+  "dashboardUrl": "http://localhost:5173",
+  "defaultTitle": "Claude Session",
+  "profile": "agent",
+  "fsMode": "summary",
+  "git": {
+    "enabled": false
+  },
+  "toolDefaults": {
+    "tool": "claude-code",
+    "model": "sonnet"
+  }
+}
+```
+
+**What calm mode does:**
+- Summarizes file changes instead of per-file spam (one event every 5 seconds)
+- Disables git monitoring by default (reduces noise)
+- Tighter ignore patterns (automatically excludes lockfiles, build output)
+- Perfect for AI agents that make lots of file changes
+
+**CLI override examples:**
+```bash
+# Use agent profile
+npx agentops watch --profile agent
+
+# Enable git in agent profile
+npx agentops watch --profile agent --git --gitInterval 30000
+
+# Use summary mode manually
+npx agentops watch --fsMode summary
 ```
 
 All commands automatically use these settings. CLI flags override config when needed.

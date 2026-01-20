@@ -15,11 +15,17 @@ async function watchCommand(options) {
     : (options.ignore
       ? options.ignore.split(',').map(s => s.trim())
       : ['node_modules', '.git', 'dist', 'build', 'coverage']);
-  const diffInterval = options.watch?.diffInterval || 5000;
+  const diffInterval = options.git?.interval || options.watch?.diffInterval || 5000;
   const apiKey = options.apiKey || null;
   const runId = options.runId || null;
   const verbose = options.verbose || false;
   let noComplete = options.noComplete || false;
+
+  // Calm mode options
+  const profile = options.profile || 'full';
+  const quiet = options.quiet || false;
+  const fsMode = options.fsMode || 'batch';
+  const gitEnabled = options.git?.enabled !== undefined ? options.git.enabled : true;
 
   // C2: Session-aware watch
   // If active session exists and user didn't explicitly set --noComplete,
@@ -42,11 +48,22 @@ async function watchCommand(options) {
   console.log('Server:', server);
   console.log('Watch path:', watchPath);
   console.log('Watch mode:', mode);
-  console.log('Ignore patterns:', ignoreList.join(', '));
-  if (mode === 'poll' || mode === 'auto') {
-    console.log('Poll interval:', pollInterval, 'ms');
+  console.log('Profile:', profile);
+  if (!quiet) {
+    console.log('FS mode:', fsMode);
+    console.log('Git monitoring:', gitEnabled ? 'enabled' : 'disabled');
+    console.log('Ignore patterns:', ignoreList.join(', '));
+    if (mode === 'poll' || mode === 'auto') {
+      console.log('Poll interval:', pollInterval, 'ms');
+    }
+    console.log('Batching:', noBatch ? 'disabled' : 'enabled');
   }
-  console.log('Batching:', noBatch ? 'disabled' : 'enabled');
+
+  // Emit calm mode notice if profile=agent
+  if (profile === 'agent') {
+    console.log('');
+    console.log('Calm mode enabled: summarizing file changes and reducing noise.');
+  }
 
   let activeRunId = runId;
 
@@ -88,6 +105,8 @@ async function watchCommand(options) {
   const gitMonitor = new GitMonitor(watchPath, {
     diffInterval,
     verbose,
+    enabled: gitEnabled,
+    emitSummary: profile === 'agent',
     onDiff: async (event) => {
       try {
         await client.postEvent(activeRunId, event);
@@ -135,6 +154,25 @@ async function watchCommand(options) {
     console.error('Failed to post start event:', err.message);
   }
 
+  // Emit collector.notice for calm mode
+  if (profile === 'agent') {
+    try {
+      await client.postEvent(activeRunId, {
+        type: 'collector.notice',
+        level: 'info',
+        agentId: 'collector',
+        payload: {
+          profile,
+          fsMode,
+          gitEnabled,
+          message: 'Calm mode: summarizing file changes and suppressing frequent git.diff'
+        }
+      });
+    } catch (err) {
+      console.error('Failed to post collector notice:', err.message);
+    }
+  }
+
   // Determine which watcher to use
   let watcher;
   let activeMode = mode;
@@ -142,8 +180,9 @@ async function watchCommand(options) {
   const watcherOptions = {
     ignore: ignoreList,
     verbose,
-    debounceMs: 250,
+    debounceMs: options.watch?.batchWindowMs || 250,
     batchMode: !noBatch,
+    fsMode,
     onEvent: async (event) => {
       try {
         await client.postEvent(activeRunId, {
@@ -154,6 +193,8 @@ async function watchCommand(options) {
         if (verbose) {
           if (event.type === 'fs.batch') {
             console.log('File batch event posted:', event.payload.count, 'changes');
+          } else if (event.type === 'fs.summary') {
+            console.log('File summary event posted:', event.payload.totalFilesTouched, 'files');
           } else {
             console.log('File change event posted:', event.payload.file, event.payload.kind);
           }

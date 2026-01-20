@@ -7,6 +7,8 @@ class GitMonitor {
     this.diffInterval = options.diffInterval || 5000;
     this.onDiff = options.onDiff || (() => {});
     this.verbose = options.verbose || false;
+    this.enabled = options.enabled !== undefined ? options.enabled : true;
+    this.emitSummary = options.emitSummary || false;
     this.intervalHandle = null;
     this.gitAvailable = false;
   }
@@ -105,14 +107,29 @@ class GitMonitor {
           ? diffStat.substring(0, 10000) + '\n... (truncated)'
           : diffStat;
 
-        this.onDiff({
-          type: 'git.diff',
-          payload: {
-            statusPorcelain: truncatedStatus,
-            diffStat: truncatedDiff,
-            timestamp: new Date().toISOString(),
-          },
-        });
+        if (this.emitSummary) {
+          // Emit git.summary for calm mode
+          const filesChanged = statusPorcelain.split('\n').filter(l => l.trim()).length;
+          this.onDiff({
+            type: 'git.summary',
+            payload: {
+              filesChanged,
+              summary: truncatedDiff,
+              status: truncatedStatus,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        } else {
+          // Emit standard git.diff
+          this.onDiff({
+            type: 'git.diff',
+            payload: {
+              statusPorcelain: truncatedStatus,
+              diffStat: truncatedDiff,
+              timestamp: new Date().toISOString(),
+            },
+          });
+        }
       }
     } catch (err) {
       this.log('Error running diff check:', err.message);
@@ -120,12 +137,17 @@ class GitMonitor {
   }
 
   start() {
-    if (!this.checkGitAvailable()) {
-      this.log('Git monitoring disabled');
+    if (!this.enabled) {
+      this.log('Git monitoring disabled (enabled=false)');
       return false;
     }
 
-    this.log('Starting git monitoring (interval:', this.diffInterval, 'ms)');
+    if (!this.checkGitAvailable()) {
+      this.log('Git monitoring disabled (git not available)');
+      return false;
+    }
+
+    this.log('Starting git monitoring (interval:', this.diffInterval, 'ms, summary mode:', this.emitSummary, ')');
     this.runDiffCheck();
 
     this.intervalHandle = setInterval(() => {

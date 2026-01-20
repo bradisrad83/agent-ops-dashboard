@@ -11,6 +11,7 @@
     "build": "pnpm -C package build",
     "server": "node server/index.js",
     "server:dev": "node server/index.js",
+    "server:reset": "rm -f server/data/agentops.sqlite* && node server/index.js",
     "ui": "pnpm -C package dev",
     "ui:build": "pnpm -C package build",
     "collector:pack": "cd collector && npm run pack",

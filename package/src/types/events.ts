@@ -14,8 +14,11 @@ export type EventType =
   | "artifact.produced"
   | "fs.changed"
   | "fs.batch"
+  | "fs.summary"
   | "git.diff"
+  | "git.summary"
   | "watch.warning"
+  | "collector.notice"
   | "session.started"
   | "session.stopped"
   | "note"
@@ -24,6 +27,10 @@ export type EventType =
   | "vscode.log"
   | "vscode.error"
   | "vscode.detected"
+  | "agent.stdout"
+  | "agent.stderr"
+  | "agent.exit"
+  | "agent.started"
   | "error";
 
 export type EventLevel = "debug" | "info" | "warn" | "error";

@@ -24,3 +24,9 @@ lerna-debug.log*
 .vscode/
 *.swp
 .agentops/
+
+server/data/
+server/data/*.sqlite
+server/data/*.sqlite-wal
+server/data/*.sqlite-shm
+

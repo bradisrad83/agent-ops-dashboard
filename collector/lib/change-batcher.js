@@ -1,10 +1,12 @@
 /**
  * ChangeBatcher - Batches filesystem changes to reduce event noise.
  * Can emit either individual fs.changed events or batched fs.batch events.
+ * Supports fsMode: 'raw', 'batch', 'summary', or 'off'.
  */
 class ChangeBatcher {
   constructor(options = {}) {
     this.batchMode = options.batchMode !== false; // default true
+    this.fsMode = options.fsMode || 'batch'; // 'raw', 'batch', 'summary', 'off'
     this.windowMs = options.windowMs || 250;
     this.onFlush = options.onFlush || (() => {});
     this.verbose = options.verbose || false;
@@ -25,6 +27,11 @@ class ChangeBatcher {
    * @param {'created'|'modified'|'deleted'} kind - Change type
    */
   queue(file, kind) {
+    // Handle fsMode=off early
+    if (this.fsMode === 'off') {
+      return;
+    }
+
     this.pendingChanges.set(file, { file, kind });
 
     if (this.debounceTimer) {
@@ -40,14 +47,33 @@ class ChangeBatcher {
    * Flush all pending changes as events.
    */
   flush() {
-    if (this.pendingChanges.size === 0) {
+    if (this.pendingChanges.size === 0 || this.fsMode === 'off') {
       return;
     }
 
     const changes = Array.from(this.pendingChanges.values());
     this.pendingChanges.clear();
 
-    if (this.batchMode && changes.length > 1) {
+    // fsMode=raw: emit individual fs.changed events
+    if (this.fsMode === 'raw') {
+      for (const change of changes) {
+        this.onFlush({
+          type: 'fs.changed',
+          payload: {
+            file: change.file,
+            kind: change.kind,
+            timestamp: new Date().toISOString(),
+          },
+        });
+      }
+      this.log(`Flushed ${changes.length} individual changes (raw mode)`);
+      return;
+    }
+
+    // fsMode=batch or fsMode=summary: emit fs.batch
+    // Note: fsMode=summary is handled by SummaryBatcher wrapper,
+    // but we still support batch mode here for backward compatibility
+    if ((this.batchMode || this.fsMode === 'batch') && changes.length > 1) {
       // Emit as fs.batch event
       this.onFlush({
         type: 'fs.batch',
@@ -59,7 +85,7 @@ class ChangeBatcher {
       });
       this.log(`Flushed batch: ${changes.length} changes`);
     } else {
-      // Emit individual fs.changed events
+      // Emit individual fs.changed events (single change or batch disabled)
       for (const change of changes) {
         this.onFlush({
           type: 'fs.changed',

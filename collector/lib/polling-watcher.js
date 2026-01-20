@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ChangeBatcher } = require('./change-batcher');
+const { SummaryBatcher } = require('./summary-batcher');
 
 /**
  * PollingWatcher - Lightweight directory scanner for environments where fs.watch is unreliable.
@@ -16,21 +17,33 @@ class PollingWatcher {
     this.maxFiles = options.maxFiles || 50000;
     this.batchMode = options.batchMode !== false; // default true
     this.debounceMs = options.debounceMs || 250;
+    this.fsMode = options.fsMode || 'batch'; // 'raw', 'batch', 'summary', 'off'
 
     // Map: filePath -> { mtimeMs, size }
     this.fileMap = new Map();
     this.pollTimer = null;
     this.isScanning = false;
 
-    // Use ChangeBatcher for batching
-    this.batcher = new ChangeBatcher({
-      batchMode: this.batchMode,
-      windowMs: this.debounceMs,
-      verbose: this.verbose,
-      onFlush: (event) => {
-        this.onEvent(event);
-      }
-    });
+    // Use SummaryBatcher for summary mode, ChangeBatcher for others
+    if (this.fsMode === 'summary') {
+      this.batcher = new SummaryBatcher({
+        windowMs: 5000, // 5 seconds for summary mode
+        verbose: this.verbose,
+        onFlush: (event) => {
+          this.onEvent(event);
+        }
+      });
+    } else {
+      this.batcher = new ChangeBatcher({
+        batchMode: this.batchMode,
+        fsMode: this.fsMode,
+        windowMs: this.debounceMs,
+        verbose: this.verbose,
+        onFlush: (event) => {
+          this.onEvent(event);
+        }
+      });
+    }
   }
 
   shouldIgnore(filePath) {

@@ -172,6 +172,12 @@ The config file (`.agentops/config.json` or `.agentops/config.jsonc`) allows you
   "server": "http://localhost:8787",
   "dashboardUrl": "http://localhost:5173",
   "defaultTitle": "Claude Session",
+  "profile": "full",
+  "fsMode": "batch",
+  "git": {
+    "enabled": true,
+    "interval": 5000
+  },
   "watch": {
     "mode": "auto",
     "path": ".",
@@ -188,13 +194,78 @@ The config file (`.agentops/config.json` or `.agentops/config.jsonc`) allows you
 }
 ```
 
-**Config priority:** CLI flags > config file > defaults
+**Config priority:** CLI flags > config file > profile defaults > base defaults
 
 **Config file locations (checked in order):**
 
 1. `.agentops/config.json`
 2. `.agentops/config.jsonc` (supports `//` line comments)
 3. `agentops.config.json`
+
+#### Profiles (Calm Mode for Agents)
+
+AgentOps supports two profiles for different use cases:
+
+**`profile: "full"` (Default)**
+
+Full fidelity mode captures every detail:
+- Individual file changes or frequent batches
+- Git diffs every 5 seconds
+- All events visible in dashboard
+
+**`profile: "agent"` (Calm Mode)**
+
+Agent-focused mode drastically reduces noise while keeping full context:
+- **Summarized file changes**: One `fs.summary` event every 5 seconds instead of per-file spam
+- **Git disabled by default**: No noisy git.diff events unless explicitly enabled
+- **Tighter ignore patterns**: Automatically ignores lockfiles (`*.lock`, `package-lock.json`, etc.) and build output
+- **Longer intervals**: If git is enabled, checks every 30 seconds instead of 5
+
+**When to use calm mode:**
+- Running AI agents (Claude Code, Cursor, etc.) that generate lots of file changes
+- You want the big picture without event spam
+- Working in large repos with frequent changes
+
+**Example config files:**
+
+Agent-focused workflow:
+```json
+{
+  "profile": "agent",
+  "fsMode": "summary",
+  "git": {
+    "enabled": false
+  }
+}
+```
+
+Full fidelity workflow:
+```json
+{
+  "profile": "full"
+}
+```
+
+**CLI overrides:**
+```bash
+# Use agent profile
+npx agentops dev --profile agent
+
+# Override specific settings
+npx agentops dev --profile agent --git
+
+# Force full mode with custom fsMode
+npx agentops watch --profile full --fsMode raw
+
+# Disable git explicitly
+npx agentops watch --noGit
+```
+
+**Available fsMode options:**
+- `batch` - Emit fs.batch events (default for full profile)
+- `summary` - Emit fs.summary every 5 seconds (default for agent profile)
+- `raw` - Emit individual fs.changed events for each file
+- `off` - Disable file change events entirely
 
 **Auto-session attachment:**
 
@@ -796,6 +867,11 @@ agentops watch [options]
 - `--pollInterval <ms>` - Polling interval in milliseconds when using poll mode (default: `1000`)
 - `--noBatch` - Disable event batching, emit individual fs.changed events (default: batching enabled)
 - `--diffInterval <ms>` - Git diff check interval in milliseconds (default: `5000`)
+- `--profile <profile>` - Profile: `agent` or `full` (default: `full`)
+- `--quiet` / `--noQuiet` - Reduce output noise (default: false)
+- `--fsMode <mode>` - File system event mode: `summary`, `batch`, `raw`, or `off` (default: `batch`)
+- `--git` / `--noGit` - Enable/disable git monitoring (default: enabled)
+- `--gitInterval <ms>` - Git check interval in milliseconds (default: `5000`)
 - `--apiKey <key>` - API key for authentication (optional)
 - `--runId <id>` - Use existing run ID instead of creating new one (optional)
 - `--noComplete` - Don't mark run as completed on exit (optional)
@@ -806,6 +882,9 @@ agentops watch [options]
 ```bash
 # Watch current directory with defaults (auto mode)
 agentops watch
+
+# Watch with agent profile (calm mode)
+agentops watch --profile agent
 
 # Watch specific path
 agentops watch --path ./src
@@ -824,6 +903,15 @@ agentops watch --noBatch
 
 # Custom ignore patterns
 agentops watch --ignore "node_modules,*.log,tmp,cache"
+
+# Use summary mode for reduced noise
+agentops watch --fsMode summary
+
+# Disable git monitoring
+agentops watch --noGit
+
+# Enable git with longer interval
+agentops watch --git --gitInterval 30000
 
 # Connect to remote server
 agentops watch --server https://my-server.com:8787 --apiKey my-secret
@@ -899,6 +987,88 @@ agentops exec -- bash -c "echo hello && ls -la"
 - stdout/stderr are streamed to terminal in real-time
 - Captured output is truncated to 20KB per stream
 - Exit code determines run status (0 = completed, non-zero = error)
+
+### `run` - Wrap CLI Agent
+
+Wraps any CLI-based agent (Claude Code CLI, Codex CLI, etc.) and streams its stdout/stderr into the active run in near real-time, so the dashboard shows "what the agent did" without relying on VS Code extension logs.
+
+```bash
+agentops run [options] -- <command> [args...]
+```
+
+**Note:** The `--` separator is required to distinguish collector options from the command being executed.
+
+**Options:**
+
+- `--title <title>` - Session title (default: `"<agent> run - <repoName>"`)
+- `--newRun` - Force new session (stop existing)
+- `--noOpen` - Don't open dashboard
+- `--agent <name>` - Agent name: `claude`, `codex`, `cursor`, `unknown` (default: `unknown`)
+- `--cwd <path>` - Working directory for command
+- `--env KEY=VALUE` - Environment variable (can be used multiple times)
+- `--redact` - Redact sensitive tokens from output
+- `--maxLine <chars>` - Max line length (default: `2000`)
+- `--flushMs <ms>` - Flush interval in ms (default: `500`)
+- `--maxBatchLines <num>` - Max lines per batch (default: `50`)
+- `--maxBatchChars <num>` - Max chars per batch (default: `20000`)
+- `--server <url>` - Server URL (default: `http://localhost:8787`)
+- `--dashboardUrl <url>` - Dashboard URL (default: `http://localhost:5173`)
+- `--apiKey <key>` - API key for authentication (optional)
+
+**Examples:**
+
+```bash
+# Wrap Claude Code CLI
+agentops run --agent claude -- claude
+
+# New run with custom title
+agentops run --newRun --title "Claude refactor" --agent claude -- claude --dangerously-skip-permissions
+
+# Wrap any command with redaction
+agentops run --agent codex --redact -- codex "refactor auth module"
+
+# With environment variables
+agentops run --agent claude --env DEBUG=true --env LOG_LEVEL=debug -- claude
+
+# Custom working directory
+agentops run --agent cursor --cwd /path/to/project -- cursor
+```
+
+**Events Emitted:**
+
+- `agent.started` - When agent process starts (includes command, args, cwd)
+- `agent.stdout` - Batched stdout output (lines array)
+- `agent.stderr` - Batched stderr output (lines array)
+- `agent.exit` - When agent process exits (includes exit code, signal, duration)
+- `run.completed` - If exit code is 0
+- `run.error` - If exit code is non-zero
+
+**Output Streaming:**
+
+- stdout/stderr are echoed to terminal in real-time
+- Lines are batched (default: 50 lines or 20KB per batch)
+- Batches are flushed every 500ms or when size limits hit
+- Lines longer than `--maxLine` are truncated
+- Optional `--redact` removes API keys and tokens
+
+**Signal Handling:**
+
+- Ctrl+C forwards SIGINT to child process
+- Waits up to 3 seconds for graceful shutdown
+- Sends SIGKILL if process doesn't exit
+- Always flushes remaining buffered output before exit
+
+**Session Management:**
+
+- Auto-attaches to active session (like other commands)
+- Or creates new session if `--newRun` specified or no session exists
+- Opens dashboard automatically (unless `--noOpen`)
+
+**Notes:**
+
+- This captures stdout/stderr and file changes (if watch running separately)
+- Prompts/responses may or may not appear depending on CLI output
+- Works best with `--redact` to remove sensitive data
 
 ## Architecture
 
@@ -1025,15 +1195,22 @@ The collector emits these event types:
 | `llm.response` | LLM response logged | `{ text, tool?, model?, tags? }` | `response`, `clip response` |
 | `fs.changed` | Individual file created/modified/deleted | `{ file, kind, timestamp }` | `watch` |
 | `fs.batch` | Batch of file changes | `{ changes: [{ file, kind }], count, windowMs }` | `watch` |
+| `fs.summary` | Summarized file activity over window | `{ windowMs, counts, top, totalFilesTouched }` | `watch` (agent profile) |
 | `watch.warning` | Watch mode warning/fallback | `{ reason, errorCode, modeSwitchedTo }` | `watch` |
 | `git.diff` | Git status/diff summary | `{ statusPorcelain, diffStat, timestamp }` | `watch` |
+| `git.summary` | Compact git change summary | `{ filesChanged, summary, status, timestamp }` | `watch` (agent profile) |
+| `collector.notice` | Collector configuration notice | `{ profile, fsMode, gitEnabled, message }` | `watch`, `dev` (agent profile) |
 | `tool.called` | Command execution started | `{ toolCallId, toolName, command, cwd, timestamp }` | `exec` |
 | `tool.result` | Command execution finished | `{ toolCallId, toolName, exitCode, durationMs, stdout, stderr }` | `exec` |
+| `agent.started` | CLI agent process started | `{ agent, command, args, cwd, repoRoot, timestamp }` | `run` |
+| `agent.stdout` | CLI agent stdout output | `{ agent, lines: string[], stream: "stdout", timestamp }` | `run` |
+| `agent.stderr` | CLI agent stderr output | `{ agent, lines: string[], stream: "stderr", timestamp }` | `run` |
+| `agent.exit` | CLI agent process exited | `{ agent, exitCode, signal, durationMs, timestamp }` | `run` |
 | `vscode.log` | VS Code log line captured | `{ line, file, tags?, level? }` | `tail`, `vscode tail` |
 | `vscode.error` | VS Code error log line | `{ line, file, tags?, level? }` | `tail`, `vscode tail` |
 | `vscode.detected` | VS Code logs detected | `{ candidates: [{ path, kind }] }` | `vscode logs` |
-| `run.completed` | Watch/exec session ended | `{ reason, timestamp }` | `watch`, `exec`, `stop` |
-| `run.error` | Command failed | `{ error, command, exitCode, timestamp }` | `exec` |
+| `run.completed` | Watch/exec session ended | `{ reason, timestamp }` | `watch`, `exec`, `run`, `stop` |
+| `run.error` | Command failed | `{ error, command, exitCode, timestamp }` | `exec`, `run` |
 
 ## Troubleshooting
 

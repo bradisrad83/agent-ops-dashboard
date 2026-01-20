@@ -77,14 +77,58 @@ function loadConfig(repoRoot) {
 }
 
 /**
+ * Apply profile-specific defaults
+ */
+function applyProfileDefaults(profile, defaults) {
+  if (profile === 'agent') {
+    // Agent profile: calm mode optimizations
+    return {
+      ...defaults,
+      quiet: true,
+      fsMode: 'summary',
+      git: {
+        enabled: false,
+        interval: 30000
+      },
+      watch: {
+        ...defaults.watch,
+        batchWindowMs: 1000,
+        diffInterval: 30000,
+        ignore: [
+          ...defaults.watch.ignore,
+          '*.lock',
+          'package-lock.json',
+          'yarn.lock',
+          'pnpm-lock.yaml',
+          'Cargo.lock',
+          'Gemfile.lock',
+          'poetry.lock',
+          '*.log',
+          'out',
+          'target'
+        ]
+      }
+    };
+  }
+  return defaults;
+}
+
+/**
  * Merge config with CLI options and defaults
- * Priority: CLI flags > config file > defaults
+ * Priority: CLI flags > config file > profile defaults > base defaults
  */
 function mergeConfig(cliOptions, config, sessionData) {
-  const defaults = {
+  const baseDefaults = {
     server: 'http://localhost:8787',
     dashboardUrl: 'http://localhost:5173',
     defaultTitle: 'Claude Session',
+    profile: 'full',
+    quiet: false,
+    fsMode: 'batch',
+    git: {
+      enabled: true,
+      interval: 5000
+    },
     watch: {
       mode: 'auto',
       path: '.',
@@ -100,15 +144,26 @@ function mergeConfig(cliOptions, config, sessionData) {
     }
   };
 
+  // Determine the profile (CLI > config > default)
+  const profile = cliOptions.profile || config?.profile || baseDefaults.profile;
+
+  // Apply profile defaults
+  const defaults = applyProfileDefaults(profile, baseDefaults);
+
   // Start with defaults
-  const merged = { ...defaults };
+  const merged = { ...defaults, profile };
 
   // Apply config file
   if (config) {
     if (config.server) merged.server = config.server;
     if (config.dashboardUrl) merged.dashboardUrl = config.dashboardUrl;
     if (config.defaultTitle) merged.defaultTitle = config.defaultTitle;
+    if (config.quiet !== undefined) merged.quiet = config.quiet;
+    if (config.fsMode) merged.fsMode = config.fsMode;
     if (config.redact !== undefined) merged.redact = config.redact;
+    if (config.git) {
+      merged.git = { ...merged.git, ...config.git };
+    }
     if (config.toolDefaults) {
       merged.toolDefaults = { ...merged.toolDefaults, ...config.toolDefaults };
     }
@@ -134,6 +189,14 @@ function mergeConfig(cliOptions, config, sessionData) {
   if (cliOptions.runId) merged.runId = cliOptions.runId;
   if (cliOptions.apiKey) merged.apiKey = cliOptions.apiKey;
   if (cliOptions.redact !== undefined) merged.redact = cliOptions.redact;
+
+  // Profile and calm mode options
+  if (cliOptions.quiet !== undefined) merged.quiet = cliOptions.quiet;
+  if (cliOptions.noQuiet !== undefined) merged.quiet = !cliOptions.noQuiet;
+  if (cliOptions.fsMode) merged.fsMode = cliOptions.fsMode;
+  if (cliOptions.git !== undefined) merged.git.enabled = cliOptions.git;
+  if (cliOptions.noGit !== undefined) merged.git.enabled = !cliOptions.noGit;
+  if (cliOptions.gitInterval) merged.git.interval = parseInt(cliOptions.gitInterval, 10);
 
   // Watch-specific options
   if (cliOptions.path) merged.watch.path = cliOptions.path;
@@ -176,6 +239,14 @@ function mergeConfig(cliOptions, config, sessionData) {
   if (cliOptions.json) merged.json = cliOptions.json;
   if (cliOptions.limit) merged.limit = parseInt(cliOptions.limit, 10);
 
+  // Run command options
+  if (cliOptions.agent) merged.agent = cliOptions.agent;
+  if (cliOptions.cwd) merged.cwd = cliOptions.cwd;
+  if (cliOptions.env) merged.env = cliOptions.env;
+  if (cliOptions.flushMs) merged.flushMs = parseInt(cliOptions.flushMs, 10);
+  if (cliOptions.maxBatchLines) merged.maxBatchLines = parseInt(cliOptions.maxBatchLines, 10);
+  if (cliOptions.maxBatchChars) merged.maxBatchChars = parseInt(cliOptions.maxBatchChars, 10);
+
   return merged;
 }
 
@@ -187,6 +258,12 @@ function getDefaultConfigTemplate(options = {}) {
     server: options.server || 'http://localhost:8787',
     dashboardUrl: options.dashboardUrl || 'http://localhost:5173',
     defaultTitle: 'Claude Session',
+    profile: 'full',
+    fsMode: 'batch',
+    git: {
+      enabled: true,
+      interval: 5000
+    },
     watch: {
       mode: 'auto',
       path: '.',
@@ -207,5 +284,6 @@ module.exports = {
   loadConfig,
   mergeConfig,
   getDefaultConfigTemplate,
-  stripLineComments
+  stripLineComments,
+  applyProfileDefaults
 };
