@@ -10,6 +10,13 @@
     "dev": "pnpm -C package build && pnpm -C playground dev",
     "build": "pnpm -C package build",
     "server": "node server/index.js",
-    "server:dev": "node server/index.js"
+    "server:dev": "node server/index.js",
+    "ui": "pnpm -C package dev",
+    "ui:build": "pnpm -C package build",
+    "collector:pack": "cd collector && npm run pack",
+    "collector:dev": "node collector/index.js dev",
+    "collector:init": "node collector/index.js init",
+    "collector:watch": "node collector/index.js watch",
+    "collector:exec": "node collector/index.js exec --"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@agentops/collector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "CLI tool to collect file changes, git diffs, and command execution events for Agent Ops Dashboard",
   "type": "commonjs",
   "main": "index.js",
@@ -11,10 +11,12 @@
     "index.js",
     "lib/**/*.js",
     "README.md",
-    "QUICKSTART.md"
+    "QUICKSTART.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "pack": "npm pack --silent"
   },
   "keywords": [
     "agent-ops",
