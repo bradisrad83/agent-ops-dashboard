@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Backend server for Agent Ops Dashboard",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "node index.js",
     "start": "node index.js"
@@ -10,6 +13,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "better-sqlite3": "^11.8.1"
+    "better-sqlite3": "^11.10.0"
   }
 }

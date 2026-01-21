@@ -264,6 +264,176 @@ const server = http.createServer(async (req, res) => {
       const body = await parseBody(req)
       const event = storage.addEvent(runId, body)
 
+      // Handle span events (span.start, span.end)
+      if (body.type === 'span.start' && body.payload) {
+        const { spanId, parentSpanId, name, kind, ts, attrs } = body.payload
+        if (spanId && name && kind) {
+          const startTs = ts || Date.now()
+          db.upsertSpan({
+            spanId,
+            runId,
+            parentSpanId,
+            name,
+            kind,
+            startTs,
+            attrs
+          })
+        }
+      } else if (body.type === 'span.end' && body.payload) {
+        const { spanId, ts, status, attrs } = body.payload
+        if (spanId) {
+          const endTs = ts || Date.now()
+          db.upsertSpan({
+            spanId,
+            runId,
+            name: '', // Will be ignored by upsert (keeps existing)
+            kind: 'custom', // Will be ignored by upsert (keeps existing)
+            startTs: endTs, // Will be ignored by upsert (keeps existing)
+            endTs,
+            status,
+            attrs
+          })
+        }
+      } else if (body.type === 'tool.called' && body.payload) {
+        // Auto-create span for tool.called events
+        const { toolCallId, toolName } = body.payload
+
+        // Generate globally unique span ID
+        // Use toolCallId if present, otherwise fall back to event id
+        const spanId = toolCallId
+          ? `tool-${runId}-${toolCallId}`
+          : `tool-${runId}-${event.id}`
+
+        if (toolName || toolCallId) {
+          const startTs = body.ts ? new Date(body.ts).getTime() : Date.now()
+
+          // Check if placeholder span exists (Part C: out-of-order upgrade)
+          const existingSpan = db.getSpan(spanId)
+
+          if (existingSpan && existingSpan.attrs?.placeholder) {
+            // Upgrade placeholder: update name, toolName, and potentially start_ts and parent
+            const upgradeAttrs = {
+              auto: true,
+              toolName: toolName || undefined,
+              toolCallId: toolCallId || undefined
+              // Remove placeholder flag by not including it
+            }
+
+            // Use earlier start time if this event has one
+            const upgradeStartTs = startTs < existingSpan.startTs ? startTs : existingSpan.startTs
+
+            // Re-evaluate parent if placeholder didn't have one
+            let upgradeParentSpanId = existingSpan.parentSpanId
+            if (!upgradeParentSpanId) {
+              const activeSpan = db.findActiveSpan(runId, upgradeStartTs)
+              upgradeParentSpanId = activeSpan ? activeSpan.spanId : null
+            }
+
+            db.upsertSpan({
+              spanId,
+              runId,
+              parentSpanId: upgradeParentSpanId,
+              name: toolName ? `Tool: ${toolName}` : existingSpan.name,
+              kind: 'tool',
+              startTs: upgradeStartTs,
+              attrs: upgradeAttrs
+            })
+          } else if (!existingSpan) {
+            // Create new span
+            const activeSpan = db.findActiveSpan(runId, startTs)
+            const parentSpanId = activeSpan ? activeSpan.spanId : null
+
+            db.upsertSpan({
+              spanId,
+              runId,
+              parentSpanId,
+              name: toolName ? `Tool: ${toolName}` : 'Tool: (unknown)',
+              kind: 'tool',
+              startTs,
+              attrs: {
+                auto: true,
+                toolName: toolName || undefined,
+                toolCallId: toolCallId || undefined
+              }
+            })
+          }
+          // If existingSpan exists and is NOT a placeholder, skip (already created properly)
+        }
+      } else if (body.type === 'tool.result' && body.payload) {
+        // Auto-complete span for tool.result events
+        const { toolCallId } = body.payload
+
+        // Generate globally unique span ID (must match tool.called)
+        const spanId = toolCallId
+          ? `tool-${runId}-${toolCallId}`
+          : null
+
+        if (spanId) {
+          const endTs = body.ts ? new Date(body.ts).getTime() : Date.now()
+
+          // Determine status from payload (Part D: deterministic error detection)
+          let status = 'ok'
+          if (body.payload.error ||
+              body.payload.success === false ||
+              body.level === 'error') {
+            status = 'error'
+          }
+
+          // Check if span exists (for out-of-order handling - Part C)
+          const existingSpan = db.getSpan(spanId)
+
+          if (existingSpan) {
+            // Update existing span
+            db.upsertSpan({
+              spanId,
+              runId,
+              name: '', // Will be ignored by upsert (keeps existing)
+              kind: 'tool', // Will be ignored by upsert (keeps existing)
+              startTs: endTs, // Will be ignored by upsert (keeps existing)
+              endTs,
+              status,
+              attrs: { auto: true }
+            })
+          } else {
+            // Create placeholder span (tool.result arrived before tool.called)
+            const activeSpan = db.findActiveSpan(runId, endTs)
+            const parentSpanId = activeSpan ? activeSpan.spanId : null
+
+            db.upsertSpan({
+              spanId,
+              runId,
+              parentSpanId,
+              name: 'Tool: (unknown)',
+              kind: 'tool',
+              startTs: Math.max(1, endTs - 1), // Start 1ms before end
+              endTs,
+              status,
+              attrs: {
+                auto: true,
+                placeholder: true,
+                toolCallId: toolCallId || undefined
+              }
+            })
+          }
+        }
+      } else if (body.type === 'usage.report' && body.payload) {
+        const { reportId, spanId, model, inputTokens, outputTokens, totalTokens, costUsd, ts, attrs, source, confidence } = body.payload
+        db.insertUsageReport({
+          runId: body.payload.runId || runId,
+          spanId,
+          ts,
+          model,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          costUsd,
+          attrs,
+          source,
+          confidence,
+          reportId
+        })
+      }
+
       // Auto-update run status on terminal events
       if (body.type === 'run.completed') {
         storage.updateRun(runId, { status: 'completed' })
@@ -305,6 +475,54 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
+    // GET /api/runs/:runId/spans
+    const spansMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/spans$/)
+    if (spansMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = spansMatch[1]
+
+      // Parse query params
+      const sinceRaw = parsedUrl.query.since
+      const since = sinceRaw ? parseInt(sinceRaw, 10) : undefined
+      const limitRaw = parseInt(parsedUrl.query.limit || '5000', 10)
+      const limit = Math.min(Math.max(1, limitRaw), 10000)
+
+      const spans = db.listSpans({ runId, since, limit })
+      sendJSON(res, 200, spans)
+      return
+    }
+
+    // GET /api/runs/:runId/usage
+    const usageMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/usage$/)
+    if (usageMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = usageMatch[1]
+
+      const usage = db.getRunUsage(runId)
+      sendJSON(res, 200, usage)
+      return
+    }
+
+    // GET /api/runs/:runId/trace-summary
+    const traceSummaryMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/trace-summary$/)
+    if (traceSummaryMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = traceSummaryMatch[1]
+
+      const summary = db.getTraceSummary(runId)
+      sendJSON(res, 200, summary)
+      return
+    }
+
     // GET /api/runs/:runId/stream (SSE)
     const streamMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/stream$/)
     if (streamMatch && method === 'GET') {
@@ -340,6 +558,9 @@ server.listen(PORT, () => {
   console.log(`   - PATCH /api/runs/:runId`)
   console.log(`   - GET   /api/runs/:runId/events?limit=N&after=<cursor>`)
   console.log(`   - POST  /api/runs/:runId/events`)
+  console.log(`   - GET   /api/runs/:runId/spans?limit=N&since=<ts>`)
+  console.log(`   - GET   /api/runs/:runId/usage`)
+  console.log(`   - GET   /api/runs/:runId/trace-summary`)
   console.log(`   - GET   /api/runs/:runId/stream (SSE)`)
   console.log(``)
   console.log(`   Cursor: Use 'after' param with event ID to fetch only newer events`)

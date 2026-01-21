@@ -2,6 +2,13 @@
 
 Real-time observability dashboard for AI agents. Track file changes, git diffs, command execution, LLM prompts/responses, and custom events from your AI coding agents like Claude, Cursor, or Codex.
 
+## Requirements
+
+- **Node.js >= 20.19.0** (required for full build with Vite 7)
+- **pnpm** (package manager)
+
+> **Note**: The server and collector can run on older Node versions (16+), but building the UI package requires Node 20.19+. Use `nvm use` or check `.nvmrc` for the recommended version.
+
 ## Features
 
 - **Real-time event tracking**: File changes, git diffs, command execution, LLM interactions

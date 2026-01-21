@@ -70,7 +70,37 @@ npx agentops copy
 npx agentops stop
 ```
 
-### Clipboard Commands (Fast Workflow)
+### Claude Commands (Works Everywhere!)
+
+**NEW:** Dedicated commands for Claude that work in VS Code extension, web, or CLI. No TTY required!
+
+```bash
+# Start dev mode
+npx agentops dev --newRun --noOpen
+
+# Use the pair workflow (recommended - interactive)
+npx agentops claude pair --model sonnet
+
+# Or use individual commands:
+# Copy prompt → run this:
+npx agentops claude prompt --model sonnet
+# Copy response → run this:
+npx agentops claude response
+
+# Open dashboard
+npx agentops open
+
+# Stop when done
+npx agentops stop
+```
+
+**Why use `agentops claude`?**
+- Auto-starts session if none exists (no need for `agentops start`)
+- Works via clipboard or stdin (no TTY parsing)
+- Clean interactive flow with `claude pair`
+- Respects config defaults for model/tool
+
+### Clipboard Commands (General Purpose)
 
 ```bash
 # Start a session
@@ -138,9 +168,41 @@ npx agentops run --agent codex --redact -- codex "implement feature"
 
 ### Claude Code Workflow (AI Agent Sessions)
 
-Track your AI coding sessions with Claude Code or any other agent:
+Track your AI coding sessions with Claude Code or any other agent.
 
-**With calm mode (recommended - reduces noise):**
+**Recommended: Use the new `agentops claude` commands:**
+
+```bash
+# 1. Start dev mode (creates session + watch)
+npx agentops dev --newRun --noOpen --profile agent
+
+# 2. Use the interactive pair workflow
+npx agentops claude pair --model sonnet
+
+# Follow the prompts:
+#   - Copy your prompt → press Enter
+#   - Copy Claude's response → press Enter
+#   ✓ Both logged!
+
+# 3. Continue working with Claude
+npx agentops claude pair
+
+# 4. Or use individual commands
+# Copy prompt:
+npx agentops claude prompt
+# Copy response:
+npx agentops claude response
+
+# 5. Log notes about your progress
+npx agentops note "Authentication complete"
+
+# 6. Open dashboard to review
+npx agentops open
+
+# 7. Stop when done (Ctrl+C)
+```
+
+**Alternative: Use generic commands with calm mode:**
 ```bash
 # 1. Start session with agent profile
 npx agentops dev --profile agent
@@ -212,9 +274,16 @@ Ctrl+C
 - Test results and command outputs
 - Complete session history in the dashboard
 
-### Fast Clipboard Workflow
+### Fast Claude Workflow (Clipboard)
 
-For maximum speed, use clipboard commands to avoid typing:
+**Recommended:** Use the new `agentops claude pair` command for the fastest workflow:
+
+```bash
+# One command does it all - just copy/paste when prompted
+npx agentops claude pair --model sonnet
+```
+
+**Alternative:** Use generic clipboard commands:
 
 ```bash
 # 1. Start session
@@ -245,20 +314,26 @@ npx agentops stop
 ```
 
 **Benefits:**
+- `claude pair`: Auto-starts session, guides you through the flow
+- `clip`: General-purpose clipboard logging for any tool
 - No need to type or paste long prompts/responses
-- Just copy and clip - takes 2 seconds
+- Just copy and run - takes 2 seconds
 - All text safely logged without cluttering terminal
-- Perfect for rapid iteration with Claude Code
+- Perfect for rapid iteration with Claude
 
-**Reading from files:**
+**Reading from files (works with both `claude` and generic commands):**
 
 ```bash
-# Log large prompts/responses from files
+# Claude commands with stdin
+npx agentops claude prompt - < my-prompt.txt
+npx agentops claude response - < response.txt
+
+# Or generic commands
 npx agentops prompt - < my-prompt.txt
 npx agentops response - < response.txt
 
 # Or from pipes
-cat long-prompt.txt | npx agentops prompt -
+cat long-prompt.txt | npx agentops claude prompt -
 ```
 
 **Advanced: Multiple tags**
@@ -316,7 +391,7 @@ Edit `.agentops/config.json` to customize defaults:
     "diffInterval": 5000
   },
   "toolDefaults": {
-    "tool": "claude-code",
+    "tool": "claude",
     "model": "sonnet"
   }
 }
@@ -334,7 +409,7 @@ Edit `.agentops/config.json` to customize defaults:
     "enabled": false
   },
   "toolDefaults": {
-    "tool": "claude-code",
+    "tool": "claude",
     "model": "sonnet"
   }
 }

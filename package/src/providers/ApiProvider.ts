@@ -1,5 +1,5 @@
-import type { EventStreamProvider, EventStreamOptions, EventStreamControl, RunSummary } from '../client/provider'
-import type { AgentOpsEvent } from '../types/events'
+import type { EventStreamProvider, EventStreamOptions, EventStreamControl, RunSummary, UsageReport, TraceSummary } from '../client/provider'
+import type { AgentOpsEvent, Span } from '../types/events'
 
 export interface ApiProviderConfig {
   baseUrl?: string
@@ -52,6 +52,27 @@ export function createApiProvider(config: ApiProviderConfig = {}): EventStreamPr
     listEvents: async (runId: string): Promise<AgentOpsEvent[]> => {
       const response = await safeFetch(`${baseUrl}/api/runs/${runId}/events?limit=500`)
       return response.json()
+    },
+
+    listSpans: async (runId: string): Promise<Span[]> => {
+      const response = await safeFetch(`${baseUrl}/api/runs/${runId}/spans?limit=5000`)
+      return response.json()
+    },
+
+    getUsage: async (runId: string): Promise<UsageReport> => {
+      const response = await safeFetch(`${baseUrl}/api/runs/${runId}/usage`)
+      return response.json()
+    },
+
+    getTraceSummary: async (runId: string) => {
+      try {
+        const response = await safeFetch(`${baseUrl}/api/runs/${runId}/trace-summary`)
+        return response.json()
+      } catch (err) {
+        // If endpoint doesn't exist (404), return null to trigger fallback
+        console.warn('[ApiProvider] trace-summary endpoint not available, will use fallback')
+        throw err
+      }
     },
 
     connect: (options: EventStreamOptions): EventStreamControl => {

@@ -18,6 +18,7 @@ const { vscodeLogsCommand } = require('./lib/vscode-logs');
 const { vscodeTailCommand } = require('./lib/vscode-tail');
 const { initCommand } = require('./lib/init');
 const { devCommand } = require('./lib/dev');
+const { claudeCommand } = require('./lib/claude');
 const { loadConfig, mergeConfig } = require('./lib/config');
 const { SessionManager } = require('./lib/session');
 
@@ -42,6 +43,7 @@ Usage:
   agentops tail [options]
   agentops vscode logs [options]
   agentops vscode tail [options]
+  agentops claude <prompt|response|pair|ask> [options]
 
 Commands:
   init        Initialize AgentOps in a repo (creates config + gitignore)
@@ -61,6 +63,12 @@ Commands:
   tail        Tail a log file and emit events
   vscode logs List available VS Code log files
   vscode tail Tail VS Code logs (auto-detect or specify file)
+
+Claude Commands:
+  claude prompt    Log Claude prompt from clipboard (or stdin)
+  claude response  Log Claude response from clipboard (or stdin)
+  claude pair      Interactive workflow: prompt + response
+  claude ask       Best-effort one-shot (requires Claude CLI)
 
 Session Commands:
   init [options]
@@ -184,6 +192,35 @@ VS Code Log Options:
     --server <url>       Override server URL
     --apiKey <key>       API key for authentication
 
+Claude Commands:
+  claude prompt [options]
+    Reads prompt from clipboard (or stdin with -)
+    --model <name>       Model name (default: from config)
+    --tag <tag>          Add tag (can be used multiple times)
+    --title <title>      Session title if auto-starting
+    --redact             Redact sensitive tokens
+    Use "-" to read from stdin: agentops claude prompt -
+
+  claude response [options]
+    Reads response from clipboard (or stdin with -)
+    --model <name>       Model name (default: from config)
+    --tag <tag>          Add tag (can be used multiple times)
+    --redact             Redact sensitive tokens
+    Use "-" to read from stdin: agentops claude response -
+
+  claude pair [options]
+    Interactive workflow: capture both prompt and response
+    --model <name>       Model name (default: from config)
+    --tag <tag>          Add tag (can be used multiple times)
+    --title <title>      Session title if auto-starting
+    --redact             Redact sensitive tokens
+
+  claude ask "<prompt>" [options]
+    Best-effort one-shot using Claude CLI (if available)
+    --model <name>       Model name (default: from config)
+    --tag <tag>          Add tag (can be used multiple times)
+    --title <title>      Session title if auto-starting
+
 Watch Options:
   --server <url>         Server URL (default: http://localhost:8787)
   --title <title>        Run title (default: "Workspace Watch")
@@ -254,6 +291,24 @@ Examples:
   agentops clip response --tool claude-code
   # 3. Open dashboard
   agentops open
+
+  # New Claude-specific commands (works everywhere)
+  # Start a session and use pair workflow:
+  agentops dev --newRun --noOpen
+  agentops claude pair --model sonnet
+
+  # Or use individual commands:
+  # Copy prompt, then:
+  agentops claude prompt --model sonnet
+  # Copy response, then:
+  agentops claude response
+
+  # Read from stdin:
+  agentops claude prompt - < my-prompt.txt
+  agentops claude response - < my-response.txt
+
+  # One-shot (if Claude CLI is available):
+  agentops claude ask "Explain how async/await works in JavaScript"
 
   # Copy dashboard URL
   agentops copy
@@ -402,6 +457,12 @@ function main() {
       console.error('Valid subcommands: logs, tail');
       process.exit(1);
     }
+  } else if (parsed.command === 'claude') {
+    // Handle claude subcommands
+    claudeCommand(parsed.commandArgs, options).catch((err) => {
+      console.error('Claude command failed:', err.message);
+      process.exit(1);
+    });
   } else {
     console.error('Unknown command:', parsed.command);
     console.error('Run "agentops --help" for usage information');

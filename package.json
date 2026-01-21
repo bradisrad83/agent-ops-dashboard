@@ -2,6 +2,9 @@
   "name": "agent-ops-dashboard-monorepo",
   "private": true,
   "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "workspaces": [
     "package",
     "playground"

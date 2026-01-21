@@ -31,6 +31,10 @@ export type EventType =
   | "agent.stderr"
   | "agent.exit"
   | "agent.started"
+  | "span.start"
+  | "span.end"
+  | "span.event"
+  | "usage.report"
   | "error";
 
 export type EventLevel = "debug" | "info" | "warn" | "error";
@@ -44,4 +48,57 @@ export interface AgentOpsEvent {
   type: EventType;
   level?: EventLevel;
   payload: Record<string, any>;
+}
+
+export type SpanKind = "llm" | "tool" | "agent" | "step" | "io" | "custom";
+export type SpanStatus = "ok" | "error" | "cancelled";
+
+export interface SpanStartPayload {
+  spanId: string;
+  parentSpanId?: string;
+  name: string;
+  kind: SpanKind;
+  ts?: number;
+  attrs?: Record<string, any>;
+}
+
+export interface SpanEndPayload {
+  spanId: string;
+  ts?: number;
+  status?: SpanStatus;
+  attrs?: Record<string, any>;
+}
+
+export interface SpanEventPayload {
+  spanId: string;
+  name: string;
+  ts?: number;
+  attrs?: Record<string, any>;
+}
+
+export interface Span {
+  spanId: string;
+  runId: string;
+  parentSpanId?: string;
+  name: string;
+  kind: SpanKind;
+  startTs: number;
+  endTs?: number;
+  status?: SpanStatus;
+  attrs?: Record<string, any>;
+}
+
+export interface UsageReportPayload {
+  reportId?: string; // uuid for idempotency
+  spanId?: string;
+  runId?: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  ts?: number;
+  attrs?: Record<string, any>;
+  source?: "metadata" | "json" | "regex" | "manual";
+  confidence?: number; // 0..1
 }

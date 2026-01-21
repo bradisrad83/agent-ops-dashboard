@@ -342,6 +342,34 @@ async function runCommand(commandArgs, options) {
 
   const startTime = Date.now();
 
+  // Create span for the agent run
+  const spanId = `span-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+  const commandStr = commandArgs.join(' ');
+  const commandPreview = commandStr.length > 80 ? commandStr.substring(0, 80) + '...' : commandStr;
+
+  try {
+    await client.postEvent(activeRunId, {
+      type: 'span.start',
+      level: 'info',
+      agentId: agent,
+      payload: {
+        spanId,
+        name: `Agent run: ${commandPreview}`,
+        kind: 'agent',
+        ts: Date.now(),
+        attrs: {
+          agent,
+          command: commandArgs[0],
+          args: commandArgs.slice(1),
+          cwd,
+          repoRoot
+        }
+      }
+    });
+  } catch (err) {
+    console.error('Failed to post span.start event:', err.message);
+  }
+
   // Post agent.started event
   try {
     await client.postEvent(activeRunId, {
@@ -590,6 +618,28 @@ async function runCommand(commandArgs, options) {
       console.error('Failed to post agent.exit event:', err.message);
     }
 
+    // End span
+    const spanStatus = exitCode === 0 ? 'ok' : 'error';
+    try {
+      await client.postEvent(activeRunId, {
+        type: 'span.end',
+        level: 'info',
+        agentId: agent,
+        payload: {
+          spanId,
+          ts: Date.now(),
+          status: spanStatus,
+          attrs: {
+            exitCode,
+            signal,
+            durationMs
+          }
+        }
+      });
+    } catch (err) {
+      console.error('Failed to post span.end event:', err.message);
+    }
+
     // Handle non-zero exit
     if (exitCode !== 0) {
       try {
@@ -642,6 +692,25 @@ async function runCommand(commandArgs, options) {
     clearInterval(flushInterval);
 
     console.error('Failed to execute command:', err.message);
+
+    // End span with error status
+    try {
+      await client.postEvent(activeRunId, {
+        type: 'span.end',
+        level: 'info',
+        agentId: agent,
+        payload: {
+          spanId,
+          ts: Date.now(),
+          status: 'error',
+          attrs: {
+            errorMessage: err.message
+          }
+        }
+      });
+    } catch (postErr) {
+      console.error('Failed to post span.end event:', postErr.message);
+    }
 
     try {
       await client.postEvent(activeRunId, {

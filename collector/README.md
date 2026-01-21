@@ -679,6 +679,245 @@ agentops stop
 
 All events (prompts, responses, notes, file changes, git diffs, test results) are tied to the same run and visible in the dashboard!
 
+### Claude Commands (Works Everywhere!)
+
+The `agentops claude` command group provides first-class support for logging Claude interactions from **any environment**: VS Code extension, Claude.ai web, or Claude CLI. These commands work via copy/paste (clipboard) or stdin, so they don't rely on brittle TTY hacks or environment-specific integrations.
+
+#### Why Use `agentops claude`?
+
+- **Works anywhere**: VS Code extension, web browser, or CLI
+- **No TTY required**: Uses clipboard or stdin, not terminal output parsing
+- **Auto-session management**: Creates a session if none exists
+- **Clean workflow**: Designed for the way you actually use Claude
+- **Optional redaction**: Remove API keys and sensitive data before logging
+
+#### Quick Start
+
+```bash
+# Start your project session
+npx agentops dev --newRun --noOpen
+
+# Use the pair workflow (easiest)
+npx agentops claude pair --model sonnet
+
+# Or use individual commands
+# Copy prompt → run this:
+npx agentops claude prompt --model sonnet
+# Copy response → run this:
+npx agentops claude response
+```
+
+#### `claude prompt` - Log a Prompt
+
+Reads your prompt from clipboard (or stdin) and logs it to the active session.
+
+```bash
+agentops claude prompt [options]
+```
+
+**Input Sources:**
+- Default: Reads from clipboard
+- Stdin: Use `-` flag: `agentops claude prompt -`
+
+**Options:**
+- `--model <name>` - Model name (default: from config or `"unknown"`)
+- `--tag <tag>` - Add tag (repeatable)
+- `--title <title>` - Session title if auto-starting (default: `"Claude Session"`)
+- `--redact` - Redact sensitive tokens (API keys, Bearer tokens, etc.)
+
+**Examples:**
+
+```bash
+# Copy your prompt, then:
+agentops claude prompt
+
+# With model and tags
+agentops claude prompt --model sonnet --tag refactoring
+
+# Read from stdin
+agentops claude prompt - < my-prompt.txt
+
+# Or pipe from another command
+echo "Explain how async/await works" | agentops claude prompt -
+
+# Auto-start session with custom title
+agentops claude prompt --title "Refactor Auth Module"
+```
+
+**What it does:**
+1. If no active session exists, starts one automatically
+2. Reads text from clipboard (or stdin with `-`)
+3. Posts `llm.prompt` event with `tool: "claude"`
+4. Applies redaction if `--redact` is set
+5. Updates run metadata with tool/model
+
+#### `claude response` - Log a Response
+
+Reads Claude's response from clipboard (or stdin) and logs it to the active session.
+
+```bash
+agentops claude response [options]
+```
+
+**Input Sources:**
+- Default: Reads from clipboard
+- Stdin: Use `-` flag: `agentops claude response -`
+
+**Options:**
+- `--model <name>` - Model name (default: from config or `"unknown"`)
+- `--tag <tag>` - Add tag (repeatable)
+- `--redact` - Redact sensitive tokens
+
+**Examples:**
+
+```bash
+# Copy Claude's response, then:
+agentops claude response
+
+# With model
+agentops claude response --model sonnet
+
+# Read from file
+agentops claude response - < response.txt
+
+# With redaction
+agentops claude response --redact
+```
+
+**What it does:**
+1. Uses the active session (or creates one if needed)
+2. Reads text from clipboard (or stdin with `-`)
+3. Posts `llm.response` event with `tool: "claude"`
+4. Applies redaction if `--redact` is set
+
+#### `claude pair` - Interactive Prompt + Response
+
+Interactive workflow that guides you through capturing both prompt and response in sequence.
+
+```bash
+agentops claude pair [options]
+```
+
+**Options:**
+- `--model <name>` - Model name (default: from config)
+- `--tag <tag>` - Add tag (repeatable)
+- `--title <title>` - Session title if auto-starting
+- `--redact` - Redact sensitive tokens
+
+**Example:**
+
+```bash
+agentops claude pair --model sonnet --title "Authentication Feature"
+```
+
+**What it does:**
+
+1. Auto-starts session if none exists
+2. Prompts: "Copy your prompt to clipboard, press Enter"
+3. Reads clipboard → logs `llm.prompt`
+4. Prompts: "Copy Claude's response to clipboard, press Enter"
+5. Reads clipboard → logs `llm.response`
+6. Both events logged successfully!
+
+**Perfect for:**
+- VS Code extension users (can't capture automatically)
+- Claude.ai web users
+- Anyone who wants explicit control over what gets logged
+
+#### `claude ask` - One-Shot (Best-Effort)
+
+Attempts to run a one-shot prompt using the `claude` CLI (if available). This is optional and best-effort only.
+
+```bash
+agentops claude ask "<prompt text>" [options]
+```
+
+**Options:**
+- `--model <name>` - Model name
+- `--tag <tag>` - Add tag
+- `--title <title>` - Session title if auto-starting
+
+**Example:**
+
+```bash
+agentops claude ask "Explain how async/await works in JavaScript"
+```
+
+**What it does:**
+
+1. Logs the prompt immediately
+2. Tries these methods in order:
+   - `claude -p "<prompt>"`
+   - `claude --prompt "<prompt>"`
+   - `echo "<prompt>" | claude`
+3. If any succeeds → logs response
+4. If all fail → logs error event with clear message
+
+**Important:**
+- This requires the `claude` CLI to be installed and support one-shot mode
+- If it doesn't work, you'll see a message suggesting to use `agentops claude pair` instead
+- This is provided as a convenience but **not required** for using AgentOps with Claude
+
+#### Config Defaults
+
+You can set tool defaults in your config file:
+
+```json
+{
+  "toolDefaults": {
+    "tool": "claude",
+    "model": "sonnet"
+  }
+}
+```
+
+Then all `agentops claude` commands will use these by default (can still be overridden with `--model` flag).
+
+#### Complete Claude Workflow Example
+
+```bash
+# 1. Initialize AgentOps in your repo (one time)
+npx agentops init
+
+# 2. Start dev mode (creates session + watch)
+npx agentops dev --newRun --noOpen
+
+# 3. Work with Claude using pair workflow
+npx agentops claude pair --model sonnet
+
+# Follow the prompts:
+#   - Copy your prompt → press Enter
+#   - Copy Claude's response → press Enter
+#   ✓ Both logged!
+
+# 4. Or use individual commands
+# Copy prompt, then:
+npx agentops claude prompt --model sonnet
+# Copy response, then:
+npx agentops claude response
+
+# 5. Check the dashboard
+npx agentops open
+
+# 6. Continue working...
+npx agentops claude pair
+
+# 7. When done
+npx agentops stop
+```
+
+#### Why Not Just Use `clip prompt` and `clip response`?
+
+The `agentops claude` commands offer several advantages:
+
+1. **Auto-session management**: Starts a session if none exists (no need to remember `agentops start`)
+2. **Claude-specific defaults**: Uses `tool: "claude"` automatically
+3. **Pair workflow**: Interactive flow designed for Claude users
+4. **Better UX**: Clear prompts and error messages tailored to Claude workflow
+5. **Config defaults**: Respects `toolDefaults.model` from your config
+
+The existing `clip` commands are still great for general-purpose clipboard logging, but `agentops claude` is purpose-built for Claude interactions.
+
 ### Optional: VS Code Log Tailing (Best-Effort)
 
 AgentOps can tail VS Code and Claude Code logs to capture additional context during development. This is a lightweight, best-effort integration that requires no extensions or API access.
@@ -1191,8 +1430,8 @@ The collector emits these event types:
 | `session.started` | Manual session started | `{ title, repoName, branch, cwd }` | `start` |
 | `session.stopped` | Manual session stopped | `{ status }` | `stop` |
 | `note` | User note logged | `{ text, tags? }` | `note`, `clip note` |
-| `llm.prompt` | LLM prompt logged | `{ text, tool?, model?, tags? }` | `prompt`, `clip prompt` |
-| `llm.response` | LLM response logged | `{ text, tool?, model?, tags? }` | `response`, `clip response` |
+| `llm.prompt` | LLM prompt logged | `{ text, tool?, model?, tags?, source? }` | `prompt`, `clip prompt`, `claude prompt`, `claude pair`, `claude ask` |
+| `llm.response` | LLM response logged | `{ text, tool?, model?, tags?, source? }` | `response`, `clip response`, `claude response`, `claude pair`, `claude ask` |
 | `fs.changed` | Individual file created/modified/deleted | `{ file, kind, timestamp }` | `watch` |
 | `fs.batch` | Batch of file changes | `{ changes: [{ file, kind }], count, windowMs }` | `watch` |
 | `fs.summary` | Summarized file activity over window | `{ windowMs, counts, top, totalFilesTouched }` | `watch` (agent profile) |
