@@ -1,0 +1,579 @@
+const http = require('http')
+const url = require('url')
+const { Database } = require('./db')
+const { Storage } = require('./storage')
+
+const PORT = process.env.PORT || 8787
+const API_KEY = process.env.AGENTOPS_API_KEY
+const LOG_LEVEL = process.env.AGENTOPS_LOG_LEVEL || 'info'
+
+// Initialize database
+const db = new Database()
+db.initDb()
+
+// Initialize storage with database
+const storage = new Storage(db)
+
+// Helper: check API key authentication
+function checkAuth(req) {
+  // If no API key is configured, auth is disabled
+  if (!API_KEY) {
+    return true
+  }
+
+  // Check for x-api-key header
+  const providedKey = req.headers['x-api-key']
+  return providedKey === API_KEY
+}
+
+// Helper: parse JSON body
+function parseBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = ''
+    req.on('data', chunk => {
+      body += chunk.toString()
+    })
+    req.on('end', () => {
+      try {
+        resolve(body ? JSON.parse(body) : {})
+      } catch (err) {
+        reject(err)
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+// Helper: send JSON response
+function sendJSON(res, status, data) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key'
+  })
+  res.end(JSON.stringify(data))
+}
+
+// Helper: send error
+function sendError(res, status, message) {
+  sendJSON(res, status, { error: message })
+}
+
+// SSE helper with proper headers and event format
+function setupSSE(req, res, runId, parsedUrl) {
+  // Check authentication for SSE
+  if (!checkAuth(req)) {
+    sendError(res, 401, 'unauthorized')
+    return false
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  })
+
+  // Send initial comment to establish connection
+  res.write(`: connected\n\n`)
+
+  // Support SSE resume via Last-Event-ID header or ?after= query param
+  // Last-Event-ID takes precedence (standard SSE header)
+  let lastEventId = req.headers['last-event-id']
+  if (!lastEventId && parsedUrl.query.after) {
+    lastEventId = parsedUrl.query.after
+  }
+
+  // If resuming, stream historical events first (capped to 1000)
+  if (lastEventId) {
+    const afterId = String(lastEventId)
+    const historicalEvents = storage.getEvents(runId, { limit: 1000, after: afterId })
+
+    for (const event of historicalEvents) {
+      try {
+        const jsonStr = JSON.stringify(event)
+        const sanitized = jsonStr.replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+        res.write(`id: ${event.id}\n`)
+        res.write(`data: ${sanitized}\n\n`)
+      } catch (err) {
+        console.error('[SSE] Error streaming historical event:', err)
+      }
+    }
+  }
+
+  // Event listener - broadcast with SSE id field
+  const listener = (event) => {
+    try {
+      // Ensure JSON is single-line (no embedded newlines that could break SSE)
+      const jsonStr = JSON.stringify(event)
+      const sanitized = jsonStr.replace(/\n/g, '\\n').replace(/\r/g, '\\r')
+
+      // Write SSE format: id field + data field + blank line
+      res.write(`id: ${event.id}\n`)
+      res.write(`data: ${sanitized}\n\n`)
+    } catch (err) {
+      console.error('[SSE] Error broadcasting event:', err)
+    }
+  }
+
+  storage.addListener(runId, listener)
+
+  // Heartbeat every 15 seconds with timestamp
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(`: heartbeat ${Date.now()}\n\n`)
+    } catch (err) {
+      // Client disconnected, cleanup will happen in 'close' handler
+      clearInterval(heartbeat)
+    }
+  }, 15000)
+
+  // Cleanup on disconnect
+  req.on('close', () => {
+    clearInterval(heartbeat)
+    storage.removeListener(runId, listener)
+  })
+
+  req.on('error', (err) => {
+    console.error('[SSE] Request error:', err)
+    clearInterval(heartbeat)
+    storage.removeListener(runId, listener)
+  })
+
+  return true
+}
+
+// Request handler
+const server = http.createServer(async (req, res) => {
+  const parsedUrl = url.parse(req.url, true)
+  const pathname = parsedUrl.pathname
+  const method = req.method
+  const startTime = Date.now()
+
+  // Request logging (unless quiet mode)
+  const logRequest = () => {
+    if (LOG_LEVEL !== 'quiet') {
+      const duration = Date.now() - startTime
+      const status = res.statusCode || 0
+      console.log(`[${new Date().toISOString()}] ${method} ${pathname} ${status} ${duration}ms`)
+    }
+  }
+
+  // Ensure logging happens when response finishes
+  res.on('finish', logRequest)
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      logRequest()
+    }
+  })
+
+  // Handle CORS preflight for all /api/* routes
+  if (method === 'OPTIONS' && pathname.startsWith('/api/')) {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, X-Api-Key'
+    })
+    res.end()
+    return
+  }
+
+  try {
+    // GET /health
+    if (pathname === '/health' && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+
+      // Check database health
+      let dbStatus = 'ok'
+      try {
+        db.db.prepare('SELECT 1').get()
+      } catch (err) {
+        dbStatus = 'error'
+        console.error('[Health] Database check failed:', err)
+      }
+
+      sendJSON(res, 200, {
+        status: dbStatus === 'ok' ? 'ok' : 'degraded',
+        time: Date.now(),
+        db: dbStatus,
+        version: process.env.VERSION || 'dev'
+      })
+      return
+    }
+
+    // GET /api/runs
+    if (pathname === '/api/runs' && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runs = storage.getRuns()
+      sendJSON(res, 200, runs)
+      return
+    }
+
+    // POST /api/runs
+    if (pathname === '/api/runs' && method === 'POST') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const body = await parseBody(req)
+      const run = storage.createRun(body)
+      sendJSON(res, 201, run)
+      return
+    }
+
+    // GET /api/runs/:runId/events
+    const eventsMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/events$/)
+    if (eventsMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = eventsMatch[1]
+
+      // Parse and validate query params
+      const limitRaw = parseInt(parsedUrl.query.limit || '500', 10)
+      const limit = Math.min(Math.max(1, limitRaw), 1000) // Cap at 1000
+      const after = parsedUrl.query.after || '0'
+
+      const events = storage.getEvents(runId, { limit, after })
+      sendJSON(res, 200, events)
+      return
+    }
+
+    // POST /api/runs/:runId/events
+    const postEventsMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/events$/)
+    if (postEventsMatch && method === 'POST') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = postEventsMatch[1]
+
+      // Auto-create run if it doesn't exist (consistent behavior)
+      if (!storage.getRun(runId)) {
+        storage.createRun({ id: runId, title: `Run ${runId}` })
+      }
+
+      const body = await parseBody(req)
+      const event = storage.addEvent(runId, body)
+
+      // Handle span events (span.start, span.end)
+      if (body.type === 'span.start' && body.payload) {
+        const { spanId, parentSpanId, name, kind, ts, attrs } = body.payload
+        if (spanId && name && kind) {
+          const startTs = ts || Date.now()
+          db.upsertSpan({
+            spanId,
+            runId,
+            parentSpanId,
+            name,
+            kind,
+            startTs,
+            attrs
+          })
+        }
+      } else if (body.type === 'span.end' && body.payload) {
+        const { spanId, ts, status, attrs } = body.payload
+        if (spanId) {
+          const endTs = ts || Date.now()
+          db.upsertSpan({
+            spanId,
+            runId,
+            name: '', // Will be ignored by upsert (keeps existing)
+            kind: 'custom', // Will be ignored by upsert (keeps existing)
+            startTs: endTs, // Will be ignored by upsert (keeps existing)
+            endTs,
+            status,
+            attrs
+          })
+        }
+      } else if (body.type === 'tool.called' && body.payload) {
+        // Auto-create span for tool.called events
+        const { toolCallId, toolName } = body.payload
+
+        // Generate globally unique span ID
+        // Use toolCallId if present, otherwise fall back to event id
+        const spanId = toolCallId
+          ? `tool-${runId}-${toolCallId}`
+          : `tool-${runId}-${event.id}`
+
+        if (toolName || toolCallId) {
+          const startTs = body.ts ? new Date(body.ts).getTime() : Date.now()
+
+          // Check if placeholder span exists (Part C: out-of-order upgrade)
+          const existingSpan = db.getSpan(spanId)
+
+          if (existingSpan && existingSpan.attrs?.placeholder) {
+            // Upgrade placeholder: update name, toolName, and potentially start_ts and parent
+            const upgradeAttrs = {
+              auto: true,
+              toolName: toolName || undefined,
+              toolCallId: toolCallId || undefined
+              // Remove placeholder flag by not including it
+            }
+
+            // Use earlier start time if this event has one
+            const upgradeStartTs = startTs < existingSpan.startTs ? startTs : existingSpan.startTs
+
+            // Re-evaluate parent if placeholder didn't have one
+            let upgradeParentSpanId = existingSpan.parentSpanId
+            if (!upgradeParentSpanId) {
+              const activeSpan = db.findActiveSpan(runId, upgradeStartTs)
+              upgradeParentSpanId = activeSpan ? activeSpan.spanId : null
+            }
+
+            db.upsertSpan({
+              spanId,
+              runId,
+              parentSpanId: upgradeParentSpanId,
+              name: toolName ? `Tool: ${toolName}` : existingSpan.name,
+              kind: 'tool',
+              startTs: upgradeStartTs,
+              attrs: upgradeAttrs
+            })
+          } else if (!existingSpan) {
+            // Create new span
+            const activeSpan = db.findActiveSpan(runId, startTs)
+            const parentSpanId = activeSpan ? activeSpan.spanId : null
+
+            db.upsertSpan({
+              spanId,
+              runId,
+              parentSpanId,
+              name: toolName ? `Tool: ${toolName}` : 'Tool: (unknown)',
+              kind: 'tool',
+              startTs,
+              attrs: {
+                auto: true,
+                toolName: toolName || undefined,
+                toolCallId: toolCallId || undefined
+              }
+            })
+          }
+          // If existingSpan exists and is NOT a placeholder, skip (already created properly)
+        }
+      } else if (body.type === 'tool.result' && body.payload) {
+        // Auto-complete span for tool.result events
+        const { toolCallId } = body.payload
+
+        // Generate globally unique span ID (must match tool.called)
+        const spanId = toolCallId
+          ? `tool-${runId}-${toolCallId}`
+          : null
+
+        if (spanId) {
+          const endTs = body.ts ? new Date(body.ts).getTime() : Date.now()
+
+          // Determine status from payload (Part D: deterministic error detection)
+          let status = 'ok'
+          if (body.payload.error ||
+              body.payload.success === false ||
+              body.level === 'error') {
+            status = 'error'
+          }
+
+          // Check if span exists (for out-of-order handling - Part C)
+          const existingSpan = db.getSpan(spanId)
+
+          if (existingSpan) {
+            // Update existing span
+            db.upsertSpan({
+              spanId,
+              runId,
+              name: '', // Will be ignored by upsert (keeps existing)
+              kind: 'tool', // Will be ignored by upsert (keeps existing)
+              startTs: endTs, // Will be ignored by upsert (keeps existing)
+              endTs,
+              status,
+              attrs: { auto: true }
+            })
+          } else {
+            // Create placeholder span (tool.result arrived before tool.called)
+            const activeSpan = db.findActiveSpan(runId, endTs)
+            const parentSpanId = activeSpan ? activeSpan.spanId : null
+
+            db.upsertSpan({
+              spanId,
+              runId,
+              parentSpanId,
+              name: 'Tool: (unknown)',
+              kind: 'tool',
+              startTs: Math.max(1, endTs - 1), // Start 1ms before end
+              endTs,
+              status,
+              attrs: {
+                auto: true,
+                placeholder: true,
+                toolCallId: toolCallId || undefined
+              }
+            })
+          }
+        }
+      } else if (body.type === 'usage.report' && body.payload) {
+        const { reportId, spanId, model, inputTokens, outputTokens, totalTokens, costUsd, ts, attrs, source, confidence } = body.payload
+        db.insertUsageReport({
+          runId: body.payload.runId || runId,
+          spanId,
+          ts,
+          model,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          costUsd,
+          attrs,
+          source,
+          confidence,
+          reportId
+        })
+      }
+
+      // Auto-update run status on terminal events
+      if (body.type === 'run.completed') {
+        storage.updateRun(runId, { status: 'completed' })
+      } else if (body.type === 'run.error' || body.type === 'error') {
+        const updates = { status: 'error' }
+        // Extract error message from payload if available
+        if (body.payload && body.payload.message) {
+          updates.errorMessage = body.payload.message
+        } else if (body.payload && body.payload.error) {
+          updates.errorMessage = body.payload.error
+        }
+        storage.updateRun(runId, updates)
+      }
+
+      sendJSON(res, 201, event)
+      return
+    }
+
+    // PATCH /api/runs/:runId
+    const patchRunMatch = pathname.match(/^\/api\/runs\/([^\/]+)$/)
+    if (patchRunMatch && method === 'PATCH') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = patchRunMatch[1]
+      const body = await parseBody(req)
+
+      // Check if run exists
+      const existingRun = storage.getRun(runId)
+      if (!existingRun) {
+        sendError(res, 404, 'not_found')
+        return
+      }
+
+      // Update run
+      const updatedRun = storage.updateRun(runId, body)
+      sendJSON(res, 200, updatedRun)
+      return
+    }
+
+    // GET /api/runs/:runId/spans
+    const spansMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/spans$/)
+    if (spansMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = spansMatch[1]
+
+      // Parse query params
+      const sinceRaw = parsedUrl.query.since
+      const since = sinceRaw ? parseInt(sinceRaw, 10) : undefined
+      const limitRaw = parseInt(parsedUrl.query.limit || '5000', 10)
+      const limit = Math.min(Math.max(1, limitRaw), 10000)
+
+      const spans = db.listSpans({ runId, since, limit })
+      sendJSON(res, 200, spans)
+      return
+    }
+
+    // GET /api/runs/:runId/usage
+    const usageMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/usage$/)
+    if (usageMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = usageMatch[1]
+
+      const usage = db.getRunUsage(runId)
+      sendJSON(res, 200, usage)
+      return
+    }
+
+    // GET /api/runs/:runId/trace-summary
+    const traceSummaryMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/trace-summary$/)
+    if (traceSummaryMatch && method === 'GET') {
+      if (!checkAuth(req)) {
+        sendError(res, 401, 'unauthorized')
+        return
+      }
+      const runId = traceSummaryMatch[1]
+
+      const summary = db.getTraceSummary(runId)
+      sendJSON(res, 200, summary)
+      return
+    }
+
+    // GET /api/runs/:runId/stream (SSE)
+    const streamMatch = pathname.match(/^\/api\/runs\/([^\/]+)\/stream$/)
+    if (streamMatch && method === 'GET') {
+      const runId = streamMatch[1]
+
+      // Auto-create run if it doesn't exist
+      if (!storage.getRun(runId)) {
+        storage.createRun({ id: runId, title: `Run ${runId}` })
+      }
+
+      setupSSE(req, res, runId, parsedUrl)
+      return
+    }
+
+    // 404
+    sendError(res, 404, 'Not found')
+  } catch (err) {
+    console.error('[Server] Error handling request:', err)
+
+    // Ensure response hasn't been sent yet
+    if (!res.headersSent) {
+      sendError(res, 500, 'Internal server error')
+    }
+  }
+})
+
+server.listen(PORT, () => {
+  console.log(`🚀 Agent Ops Dashboard Server running on http://localhost:${PORT}`)
+  console.log(`   API endpoints:`)
+  console.log(`   - GET   /health`)
+  console.log(`   - GET   /api/runs`)
+  console.log(`   - POST  /api/runs`)
+  console.log(`   - PATCH /api/runs/:runId`)
+  console.log(`   - GET   /api/runs/:runId/events?limit=N&after=<cursor>`)
+  console.log(`   - POST  /api/runs/:runId/events`)
+  console.log(`   - GET   /api/runs/:runId/spans?limit=N&since=<ts>`)
+  console.log(`   - GET   /api/runs/:runId/usage`)
+  console.log(`   - GET   /api/runs/:runId/trace-summary`)
+  console.log(`   - GET   /api/runs/:runId/stream (SSE)`)
+  console.log(``)
+  console.log(`   Cursor: Use 'after' param with event ID to fetch only newer events`)
+  console.log(`   SSE: Events include 'id:' field for cursor tracking`)
+  console.log(`   SSE Resume: Send Last-Event-ID header or ?after= to resume from cursor`)
+
+  if (API_KEY) {
+    console.log(``)
+    console.log(`   🔒 Authentication: ENABLED (API key required)`)
+    console.log(`      Include header: x-api-key: <your-key>`)
+  } else {
+    console.log(``)
+    console.log(`   🔓 Authentication: DISABLED (local dev mode)`)
+    console.log(`      Set AGENTOPS_API_KEY to enable authentication`)
+  }
+})

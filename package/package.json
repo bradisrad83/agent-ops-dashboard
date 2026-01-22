@@ -17,6 +17,9 @@
     },
     "./style.css": "./dist/style.css"
   },
+  "engines": {
+    "node": ">=20.19.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc -p tsconfig.build.json && vite build",
