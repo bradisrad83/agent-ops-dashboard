@@ -87,10 +87,10 @@ agent-ops-dashboard/
 │   ├── index.js        # Server entry point
 │   ├── db.js           # Database layer
 │   └── routes/         # API routes
-├── package/            # React + Vite dashboard UI
+├── package/            # Vue.js + Vite dashboard UI
 │   └── src/
 │       ├── components/ # UI components
-│       └── App.tsx     # Main dashboard
+│       └── App.vue     # Main dashboard
 └── scripts/            # Build and test scripts
     └── smoke-install.sh # End-to-end install verification
 ```
@@ -332,10 +332,10 @@ Built with [Hono](https://hono.dev/) for the API and SQLite for storage. It:
 
 ### Dashboard
 
-React + Vite + TailwindCSS dashboard that:
+Vue.js + Vite + TailwindCSS dashboard that:
 - Shows runs in a sortable/filterable list
 - Displays events in real-time with syntax highlighting
-- Uses React Query for efficient data fetching
+- Uses Vue Query for efficient data fetching
 - Updates automatically via polling (WebSocket support planned)
 
 ## API Reference
